@@ -1,0 +1,14 @@
+Workflow:- 
+========
+
+3 servers --> networking --> ssh --> firewall --> K3s.
+
+Three-Server Setup
+
+Server 1 -> Cluster-master K3s control plane
+
+Server 2 -> Cluster-worker1 K3s worker
+
+Server 3 -> Cluster-worker2 K3s worker
+
+
