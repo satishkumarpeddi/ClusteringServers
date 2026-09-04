@@ -33,4 +33,20 @@ sudo hostnamectl set-hostname cluster-worker1
 
 sudo hostnamectl set-hostname cluster-worker2
 
+Setting /etc/hosts:-
+==================
 
+sudo vim /etc/hosts
+
+192.168.x.x cluster-master
+192.168.x.x cluster-worker1
+192.168.x.x clsuter-worker2
+
+Next:-
+"""
+	ping -c 3 cluster-master
+	ping -c 3 cluster-worker1
+	ping -c 3 cluster-worker2 
+
+	The above command is used to check the connectivity of the users
+"""
