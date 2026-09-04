@@ -50,3 +50,14 @@ Next:-
 
 	The above command is used to check the connectivity of the users
 """
+
+Setting Up Secure Shell Access:-
+==============================
+
+ssh-keygen -t ed25519
+
+ssh-copy-id -p port_name hostname@ip_address 
+
+Adding configuration :- sudo vim ~/.ssh/config 
+
+ls ~/.ssh --> To see the ssh-key token's .pub 
