@@ -79,7 +79,28 @@ sudo ufw enable
 
 sudo ufw status
 
+After configuration of firewall (verification process):-
+======================================================
 
+From cluster-master
+===================
+
+ssh cluster-worker1
+
+ssh cluster-worker2
+
+From cluster-worker1
+====================
+
+ping -c 3 cluster-master
+
+From cluster-worker2
+====================
+
+ping -c 3 cluster-master 
+
+
+ 
 
 
 
