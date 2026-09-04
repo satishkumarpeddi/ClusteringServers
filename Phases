@@ -61,3 +61,25 @@ ssh-copy-id -p port_name hostname@ip_address
 Adding configuration :- sudo vim ~/.ssh/config 
 
 ls ~/.ssh --> To see the ssh-key token's .pub 
+
+Configure the firewall:-
+======================
+
+Using `UFW` on all three ubuntu servers
+
+Note:-"" The goal is to secure the servers while allowing the traffic required for SSH and later, K3s""
+
+Allow SSH before enable UFW:- 
+
+--> sudo ufw allow 22/tcp 
+
+--> sudo ufw allow from 192.168.1.0/24
+
+sudo ufw enable
+
+sudo ufw status
+
+
+
+
+
