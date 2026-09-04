@@ -100,7 +100,27 @@ From cluster-worker2
 ping -c 3 cluster-master 
 
 
- 
+Time Synchronization
+====================
+
+timedatectl status 
+
+O/p:-
+
+"""
+	System clock synchronized: yes
+	NTP services: active
+""" 
+
+sudo timedatectl set-ntp ture --> It the sychronized is not active
+
+Note:-
+=====
+"""
+	The times should be essentially identical on all the server / cluster (i.e cluster-master,cluster-worker1,cluster-worker2)
+"""
+
+
 
 
 
