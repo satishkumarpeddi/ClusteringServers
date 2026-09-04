@@ -140,4 +140,15 @@ ssh cluster-worker1 hostname
 
 ssh cluster-worker2 hostname
 
+Note:-
+"""
+	sudo timedatectl set-local-rtc 0
 
+	This configures Linux to use UTC for the hardware/RTC clock, which is generally the recommend setting-especially if you're running Ubunut/Linux alongside with windows or in VMs
+
+"""
+
+Workflow (phase1) :-
+=================
+
+3 Linux/Ubuntu Servers -> Networking -> Hostnames -> SSH -> Firewall -> Time Synchronization 
