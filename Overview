@@ -77,4 +77,23 @@ Initial Architecture:-
               │ Monitoring              │
               └─────────────────────────┘
 
+Project Phase:-
+=============
+
+docs/
+├── architecture.md
+├── networking.md
+├── scaling.md
+├── disaster-recovery.md
+└── deployment.md
+
+Kubernets:-
+=========
+
+K3s Control Plane
+       │
+ ┌─────┴─────┐
+ ▼           ▼
+Worker 1   Worker 2
+
 
