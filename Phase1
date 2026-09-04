@@ -1,0 +1,36 @@
+Phase 1:- 
+=======
+
+Networking 
+==========
+
+hostname 
+
+whoami
+
+ip addr
+
+hostname -I
+
+ip route 
+
+Ping is used to check the connectivity between the nodes
+========================================================
+
+ping -c n clustermasternode 
+
+ping -c n clusterworker1
+
+ping -c n clusterworker2 
+
+
+Chaning the hostname's 
+======================
+
+sudo hostnamectl set-hostname cluster-master
+
+sudo hostnamectl set-hostname cluster-worker1
+
+sudo hostnamectl set-hostname cluster-worker2
+
+
