@@ -11,4 +11,70 @@ Server 2 -> Cluster-worker1 K3s worker
 
 Server 3 -> Cluster-worker2 K3s worker
 
+Final Version Of Workflow:- 
+=========================
+
+                    MY PRIVATE CLOUD
+                          │
+             ┌────────────┴────────────┐
+             │                         │
+        Kubernetes                 Networking
+             │
+      ┌──────┼──────┐
+      │      │      │
+   Server1 Server2 Server3
+   Master  Worker1 Worker2
+      │      │      │
+      └──────┼──────┘
+             │
+        Applications
+             │
+     ┌───────┼────────┐
+     │       │        │
+ PostgreSQL  ETL   Monitoring
+     │
+     ▼
+S&P 500 Data Warehouse
+
+
+
+Scaling servers from 3 --> 5:-
+============================
+
+Start with 3 ubuntu servers --> build a private cloud --> deploy my existing s&p 500 data warehouse --> make the infrastructure scalable to 5 servers --> monitor it --> test failure --> automate --> operations
+
+
+Initial Architecture:-
+====================
+
+                         USERS
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │ LoadBalancer│
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │ K3s Cluster │
+                    └──────┬──────┘
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+          ▼                ▼                ▼
+     ┌─────────┐      ┌─────────┐      ┌─────────┐
+     │ Server1 │      │ Server2 │      │ Server3 │
+     │ Control │      │ Worker  │      │ Worker  │
+     │  Plane  │      │    1    │      │    2    │
+     └─────────┘      └─────────┘      └─────────┘
+                           │
+                           ▼
+              ┌─────────────────────────┐
+              │    Cloud Applications   │
+              ├─────────────────────────┤
+              │ PostgreSQL              │
+              │ Python ETL              │
+              │ Data Warehouse          │
+              │ Monitoring              │
+              └─────────────────────────┘
+
 
