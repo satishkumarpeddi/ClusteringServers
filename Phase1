@@ -120,7 +120,24 @@ Note:-
 	The times should be essentially identical on all the server / cluster (i.e cluster-master,cluster-worker1,cluster-worker2)
 """
 
+Verification after Time Synchronization:-
+=======================================
 
+date --> It should be same on all the cluster-worker1,2 
 
+Checking on cluster-master:-
+==========================
+
+hostname 
+
+hostname -I 
+
+ping -c 2 cluster-worker1
+
+ping -c 2 cluster-worker2
+
+ssh cluster-worker1 hostname 
+
+ssh cluster-worker2 hostname
 
 
