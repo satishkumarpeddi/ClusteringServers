@@ -1,0 +1,38 @@
+Fixing Grub 
+===========
+
+Note:-  
+"""
+	Windows boot loader 
+	Windows boot manager
+
+Windows boot loader:-
+===================
+
+ 	Windows Boot Loader actually loads the operating system's kernel into memory
+
+Windows boot manager:-
+====================
+		
+	Windows Boot Manager handles the selection menu and overall boot configuration
+"""
+
+fdisk -l --> (list all the avaiable partition's on the system
+
+mount -t /mnt/sda1 /mnt/boot/efi --> (It mount's the efi partition that is associated with window boot loader)
+
+mount -t /mnt/nvem10p1 /mnt --> Just change in the parition name 
+
+mount -t /mnt/sda4 /mnt/ --> The ext4 file-system associated with dual booting of linux operating system
+
+chroot /mnt --> chroot is used to change the root directory to changed one
+
+grub-install /dev/sdb | /dev/nvme10p 
+
+mount -t efivarfs none /sys/firmware/efi/efivars
+
+update-grub
+
+efibootmgr --> Used to verify the EFI boot order and confirm the new ubuntu/linux entry was created successfully
+
+
