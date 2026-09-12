@@ -1,0 +1,12 @@
+K3s (Kubernetes)
+================
+
+Spec's checking
+===============
+
+free -h 
+
+lscup | grep -E 'Model name|CPU\(s\)'
+
+df -h /
+
