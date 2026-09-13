@@ -61,6 +61,45 @@ Copying the entire token to `Cluster-worker1` --> (sudo cat /var/lib/rancher/k3s
 
 Using ssh (Secure Shell):- curl -sfl https://get.k3s.io | K3S_URL=https://192.168.1.7:6443 K3S_TOKEN='YOUR_TOKEN_HERE' sh -
 
+"""
+	sudo kubectl get nodes -o wide --> (Inorder to get the information in detail manner)
+"""
+
+"""
+	      K3s Cluster
+                  │
+          ┌───────┴───────┐
+          │ Core / Master │
+          │ 192.168.1.7   │
+          └───────┬───────┘
+                  │
+       ┌──────────┼──────────┐
+       │          │          │
+    Worker1    Worker2     Server4
+    .1.2       .1.3        .1.8
+                  │
+               Server5
+                .1.4
+"""
+
+4-node private Kubernetes cluster:-
+==================================
+
+                    ┌──────────────────────┐
+                    │    cluster-master    │
+                    │ Ubuntu 26.04.1 LTS   │
+                    │   192.168.1.7        │
+                    │    CONTROL PLANE     │
+                    └──────────┬───────────┘
+                               │
+             ┌─────────────────┼─────────────────┐
+             │                 │                 │
+      ┌──────▼──────┐   ┌──────▼──────┐   ┌──────▼──────┐
+      │  worker1    │   │  worker2    │   │   server4   │
+      │    Kali     │   │    Kali     │   │    Kali     │
+      │ 192.168.1.2 │   │ 192.168.1.3 │   │ 192.168.1.8 │
+      │    READY    │   │    READY    │   │    READY    │
+      └─────────────┘   └─────────────┘   └─────────────┘
 
 
 
