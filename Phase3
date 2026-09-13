@@ -1,0 +1,59 @@
+Infrastructure:-
+==============
+
+4-node K3s clsuter --> healthy --> 8GB cluster-master --> ready for workloads.
+
+Create a namespace for the DataWareHouse :- datawarehouse
+
+command :- sudo kubectl create namespace datawarehouse
+
+sudo kubectl get namespaces
+
+"""
+	apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: datawarehouse
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-path
+
+--> vim postgres-storage.yaml
+"""
+
+command :- sudo kubectl apply pvc -f postgres-storage.yaml
+	   sudo kubectl get pvc -n datawarehouse
+           sudo kubectl apply -f postgres.yaml
+           sudo kubectl apply get pods -n datawarehouse
+	   sudo kubectl get pvc -n datawarehouse
+           sudo kubectl apply -f postgres-service.yaml
+           sudo kubectl get svc -n datawarehouse
+           sudo kubectl get pods,pvc,pv,svc -n datawarehouse --> (Getting all at once's)
+---
+
+Design WorkFlow:-
+===============
+
+"""
+ 4-Node K3s Private Cloud
+          │
+          ▼
+ datawarehouse namespace
+          │
+          ▼
+      PostgreSQL
+          │
+          ▼
+  Persistent Volume
+      20 GB
+          │
+          ▼
+Your S&P 500 Data Warehouse
+"""
+
+
