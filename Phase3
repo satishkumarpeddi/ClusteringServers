@@ -56,4 +56,13 @@ Design WorkFlow:-
 Your S&P 500 Data Warehouse
 """
 
+Foundation Completed K3s
+=========================
 
+K3s Cluster
+    │
+    ├── PostgreSQL Pod        ✅ Running
+    ├── PostgreSQL Service    ✅ Created
+    ├── PVC                   ✅ Bound
+    ├── PV                    ✅ Bound
+    └── local-path storage    ✅ 20 GiB
