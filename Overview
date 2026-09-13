@@ -157,3 +157,60 @@ Load Balancing Design:-
             │ Server 4  │
             │ Server 5  │
             └───────────┘
+
+
+Role's of the differenet System's/Servers:-
+=========================================
+
+| Node         | OS          | Hardware                   | Role              |
+| ------------ | ----------- | -------------------------- | ----------------- |
+| **Core**     | Ubuntu      | AMD A9-9425 / ~3 GB        | K3s control plane |
+| **Worker 1** | Kali        | i5-12500H / 15 GB          | Worker cluster    |
+| **Worker 2** | Kali        | Ryzen 7 7435HS / 23 GB     | Worker cluster    |
+| **Server 3** | Kali        | Core Ultra 7 155H / ~16 GB | Scalable server   |
+| **Server 5** | Ubuntu/Kali | TBD                        | Scalable server   |
+
+
+Clustering Target Design:-
+========================
+
+                       PRIVATE CLOUD
+                            │
+                     ┌──────▼──────┐
+                     │    CORE     │
+                     │   Ubuntu    │
+                     │ K3s Server  │
+                     └──────┬──────┘
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+       WORKER CLUSTER              SCALABLE SERVERS
+              │                           │
+       ┌──────┴──────┐              ┌─────┴─────┐
+       │             │              │           │
+   Worker 1      Worker 2        Server 3    Server 5
+     Kali          Kali            Kali        Ubuntu/Kali
+   15 GB RAM     23 GB RAM       ~16 GB RAM     TBD
+
+
+Design Conclusion:-
+=================
+
+Worker cluster
+
+Worker 1 + Worker 2 handle your normal compute workload.
+Worker 2 is your strongest RAM node.
+PostgreSQL/data-warehouse workloads can preferentially run on Worker 2.
+
+Scale-out tier
+
+Server 3 and Server 5 provide additional capacity.
+Server 5 is particularly powerful.
+Server 3 is useful for lightweight replicas, but its 14 GB free disk makes it unsuitable for large persistent data.
+
+Core
+
+Keep the old 3-GB machine focused on K3s control-plane duties.
+Avoid putting PostgreSQL or heavy workloads there.
+
+This gives us a genuinely interesting project: heterogeneous private cloud + workload scheduling + horizontal scaling + load balancing + failure testing.
