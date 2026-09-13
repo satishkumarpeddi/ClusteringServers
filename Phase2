@@ -53,7 +53,15 @@ sudo systemctl status k3s
 
 To get the token of k3s:- sudo cat /var/lib/rancher/k3s/server/node-token
 
-sudo kubectl get nodes
+sudo kubectl get nodes --> get's wheather the cluster-master is ready or not
+
+------------------------------------------------------------------------------
+
+Copying the entire token to `Cluster-worker1` --> (sudo cat /var/lib/rancher/k3s/server/node-token)
+
+Using ssh (Secure Shell):- curl -sfl https://get.k3s.io | K3S_URL=https://192.168.1.7:6443 K3S_TOKEN='YOUR_TOKEN_HERE' sh -
+
+
 
 
 
