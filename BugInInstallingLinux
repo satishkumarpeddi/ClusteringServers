@@ -19,20 +19,28 @@ Windows boot manager:-
 
 fdisk -l --> (list all the avaiable partition's on the system
 
-mount -t /mnt/sda1 /mnt/boot/efi --> (It mount's the efi partition that is associated with window boot loader)
+mount  /mnt/sda1 /mnt/boot/efi --> (It mount's the efi partition that is associated with window boot loader)
 
-mount -t /mnt/nvem10p1 /mnt --> Just change in the parition name 
+mount  /mnt/nvem0n1p1 /mnt --> Just change in the parition name 
 
-mount -t /mnt/sda4 /mnt/ --> The ext4 file-system associated with dual booting of linux operating system
+mount  /mnt/sda4 /mnt/ --> The ext4 file-system associated with dual booting of linux operating system
+
+for i in /dev /dev/pts /sys /run do; mount -B $i /mnt$i; done 
+
+				or
+
+for i in /dev /dev/pts /sys /run do; mount --bind $i /mnt$i; done
+
 
 chroot /mnt --> chroot is used to change the root directory to changed one
 
-grub-install /dev/sdb | /dev/nvme10p 
+grub-install /dev/sdb | /dev/nvme0n1p
 
 mount -t efivarfs none /sys/firmware/efi/efivars
 
 update-grub
 
 efibootmgr --> Used to verify the EFI boot order and confirm the new ubuntu/linux entry was created successfully
+
 
 

@@ -96,4 +96,64 @@ K3s Control Plane
  ▼           ▼
 Worker 1   Worker 2
 
+Structural Design Of 5 Nodes:-
+============================
 
+
+62 GB RAM + 62 logical CPUs + 405 GB available worker storage.
+
+| Node         | OS     | CPU                       |    RAM | Available Disk | Rating             |
+| ------------ | ------ | ------------------------- | -----: | -------------: | ------------------ |
+| Core         | Ubuntu | AMD A9-9425, 2C           |   3 GB |         492 GB | 🔴 Weak            |
+| Worker 1     | Kali   | i5-12500H, 16 CPU         |  15 GB |         106 GB | 🟢 Strong          |
+| Worker 2     | Kali   | Ryzen 7 7435HS, 16 CPU    |  23 GB |         124 GB | 🟢 Best RAM        |
+| Worker 3     | Kali   | i3-13150, 8 CPU           |  11 GB |          14 GB | 🟡 Storage-limited |
+| Server 5     | Kali   | Core Ultra 7 155H, 22 CPU |  16 GB |         161 GB | 🟢 Best CPU        |
+
+
+                         ┌──────────────────────┐
+                         │        CORE          │
+                         │       Ubuntu         │
+                         │   K3s Control Plane  │
+                         └──────────┬───────────┘
+                                    │
+                         ┌──────────▼──────────┐
+                         │   Load Balancer     │
+                         │   Traffic Routing   │
+                         └──────────┬──────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+              Worker Cluster A                Worker Cluster B
+                    │                               │
+             ┌──────┴──────┐                 ┌──────┴──────┐
+             │             │                 │             │
+          Worker A1     Worker A2         Worker B1     Worker B2
+             │             │                 │             │
+             └──────┬──────┘                 └──────┬──────┘
+                    │                               │
+                    └──────────────┬────────────────┘
+                                   │
+                         ┌─────────▼─────────┐
+                         │ Scalable Servers  │
+                         │                   │
+                         │ Server 4          │
+                         │ Server 5          │
+                         └───────────────────┘
+
+Load Balancing Design:-
+=====================
+
+
+              Normal load
+                  │
+            ┌─────▼─────┐
+            │ Server 4  │
+            └───────────┘
+
+             High load
+                  │
+            ┌─────▼─────┐
+            │ Server 4  │
+            │ Server 5  │
+            └───────────┘
