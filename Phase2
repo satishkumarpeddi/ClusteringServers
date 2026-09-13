@@ -51,6 +51,8 @@ curl -sfL https://get.k3s.io | sh -
 
 sudo systemctl status k3s
 
+To get the token of k3s:- sudo cat /var/lib/rancher/k3s/server/node-token
+
 sudo kubectl get nodes
 
 
