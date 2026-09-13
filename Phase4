@@ -1,0 +1,761 @@
+# Phase 4 — Data Warehouse
+
+## Overview
+
+Phase 4 is the core data-engineering phase of the Private Cloud Data Warehouse project.
+
+The objective of this phase was to transform the S&P 500 historical stock dataset into a validated PostgreSQL data warehouse and deploy it inside the K3s private-cloud environment.
+
+The phase focuses on:
+
+* ETL pipeline development
+* Data transformation
+* Data-quality validation
+* Staging architecture
+* Dimensional modeling
+* Star-schema design
+* Fact and dimension tables
+* Data-quality quarantine
+* PostgreSQL constraints
+* Stored procedures
+* Analytical queries
+* Kubernetes-based PostgreSQL deployment
+* Persistent storage
+
+---
+
+## Phase 4 Architecture
+
+```text
+                    S&P 500 Dataset
+                           |
+                           v
+                     Extraction
+                           |
+                           v
+                    Transformation
+                           |
+                           v
+                    Staging Layer
+                           |
+                           v
+                    Data Validation
+                     /           \
+                    /             \
+               VALID DATA      INVALID DATA
+                   |                 |
+                   v                 v
+             Data Warehouse    Quality Errors
+                   |
+                   v
+               Analytics
+                   |
+                   v
+                Power BI
+```
+
+The PostgreSQL warehouse is deployed inside the K3s private cloud:
+
+```text
+S&P 500 Dataset
+       |
+       v
+   ETL Pipeline
+       |
+       v
+ PostgreSQL
+       |
+       v
+  K3s Cluster
+       |
+       v
+Private Cloud
+```
+
+---
+
+# 4.1 Source Dataset
+
+The project uses historical S&P 500 stock-price data.
+
+The original dataset contains:
+
+| Column   | Description         |
+| -------- | ------------------- |
+| `date`   | Trading date        |
+| `open`   | Opening stock price |
+| `high`   | Highest price       |
+| `low`    | Lowest price        |
+| `close`  | Closing stock price |
+| `volume` | Trading volume      |
+| `Name`   | Stock ticker        |
+
+The original dataset contained:
+
+```text
+619,040 records
+```
+
+---
+
+# 4.2 ETL Pipeline
+
+The ETL pipeline follows:
+
+```text
+Extract → Transform → Validate → Load
+```
+
+### Extract
+
+The source dataset is read into the ETL pipeline.
+
+### Transform
+
+The source columns are normalized into warehouse-friendly names:
+
+```text
+open  → open_price
+high  → high_price
+low   → low_price
+close → close_price
+Name  → ticker
+```
+
+Additional transformations include:
+
+* Date parsing
+* Numeric type conversion
+* Ticker normalization
+* Whitespace removal
+* Uppercase ticker conversion
+* Data-type standardization
+
+The resulting structure is:
+
+```text
+date
+ticker
+open_price
+high_price
+low_price
+close_price
+volume
+```
+
+---
+
+# 4.3 Staging Layer
+
+The transformed data is loaded into:
+
+```text
+staging.stock_prices
+```
+
+The staging table acts as an intermediate layer between the incoming dataset and the trusted warehouse.
+
+### Staging schema
+
+```text
+staging.stock_prices
+
+├── date
+├── ticker
+├── open_price
+├── high_price
+├── low_price
+├── close_price
+└── volume
+```
+
+Current staging record count:
+
+```text
+619,040
+```
+
+The staging layer allows the ETL process to validate and inspect incoming data before it reaches the warehouse.
+
+---
+
+# 4.4 Data Quality Validation
+
+Data validation is performed before records are loaded into the fact table.
+
+The pipeline checks:
+
+### Required columns
+
+```text
+date
+ticker
+open_price
+high_price
+low_price
+close_price
+volume
+```
+
+### Null values
+
+Important fields are checked for unexpected NULL values.
+
+### Price validation
+
+Prices must be positive:
+
+```text
+open_price > 0
+high_price > 0
+low_price > 0
+close_price > 0
+```
+
+### Volume validation
+
+Trading volume cannot be negative.
+
+### Duplicate validation
+
+The pipeline checks for duplicate:
+
+```text
+date + ticker
+```
+
+records.
+
+### OHLC validation
+
+The following relationships must hold:
+
+```text
+High >= Low
+
+Low <= Open <= High
+
+Low <= Close <= High
+```
+
+---
+
+# 4.5 Data Quality Issue Discovered
+
+During the fact-table load, the PostgreSQL constraint:
+
+```text
+chk_high_low
+```
+
+correctly rejected an invalid record.
+
+Example:
+
+```text
+Date:   2014-05-19
+Ticker: AOS
+
+Open:   23.890000
+High:   23.595000
+Low:    23.850000
+Close:  24.445000
+```
+
+The record violates:
+
+```text
+High >= Low
+```
+
+because:
+
+```text
+23.595 < 23.850
+```
+
+This demonstrated that the warehouse constraint was working correctly.
+
+---
+
+# 4.6 Data Quality Quarantine
+
+Instead of removing the constraint or modifying the original source data, invalid records are quarantined.
+
+The architecture is:
+
+```text
+                 Staging
+                    |
+              Data Validation
+               /          \
+              /            \
+           VALID          INVALID
+             |                |
+             v                v
+      Fact Table       data_quality_errors
+```
+
+Invalid records are recorded in:
+
+```text
+staging.data_quality_errors
+```
+
+The table stores:
+
+```text
+error_type
+error_message
+ticker
+error_date
+```
+
+---
+
+# 4.7 Invalid Records Identified
+
+A total of:
+
+```text
+12 invalid records
+```
+
+were identified and quarantined.
+
+| Date       | Ticker | Validation Error       |
+| ---------- | ------ | ---------------------- |
+| 2014-05-19 | AOS    | High < Low             |
+| 2014-05-19 | CHD    | Open outside High/Low  |
+| 2014-05-28 | SPG    | Close outside High/Low |
+| 2014-06-30 | CHK    | Close outside High/Low |
+| 2014-07-01 | IP     | Close outside High/Low |
+| 2014-08-27 | O      | Close outside High/Low |
+| 2014-11-06 | DHR    | Open outside High/Low  |
+| 2014-11-06 | O      | Open outside High/Low  |
+| 2016-03-14 | BBY    | Close outside High/Low |
+| 2016-05-13 | WRK    | Close outside High/Low |
+| 2016-05-19 | LNT    | Close outside High/Low |
+| 2016-06-10 | UA     | Close outside High/Low |
+
+The original source values were not modified.
+
+---
+
+# 4.8 Warehouse Star Schema
+
+The warehouse follows a star-schema architecture.
+
+```text
+                         dim_date
+                            |
+                            |
+                            v
+                   +-------------------+
+                   |                   |
+                   | fact_stock_prices |
+                   |                   |
+                   +-------------------+
+                            ^
+                            |
+                            |
+                       dim_company
+```
+
+The three primary warehouse tables are:
+
+```text
+warehouse.dim_date
+warehouse.dim_company
+warehouse.fact_stock_prices
+```
+
+---
+
+# 4.9 Date Dimension
+
+Table:
+
+```text
+warehouse.dim_date
+```
+
+Purpose:
+
+* Centralize date information
+* Support time-based analytics
+* Avoid repeated date attributes
+* Enable daily/monthly/yearly analysis
+
+Current record count:
+
+```text
+1,259
+```
+
+---
+
+# 4.10 Company Dimension
+
+Table:
+
+```text
+warehouse.dim_company
+```
+
+Purpose:
+
+* Store company/ticker information
+* Provide a stable company key
+* Support company-level analytics
+
+Current record count:
+
+```text
+505
+```
+
+---
+
+# 4.11 Fact Table
+
+Table:
+
+```text
+warehouse.fact_stock_prices
+```
+
+Columns:
+
+```text
+date_key
+company_key
+open_price
+high_price
+low_price
+close_price
+volume
+```
+
+The grain of the fact table is:
+
+> One company's stock-price observation for one trading date.
+
+The logical uniqueness is:
+
+```text
+(company_key, date_key)
+```
+
+---
+
+# 4.12 Fact Loading
+
+The warehouse load is implemented through the PostgreSQL procedure:
+
+```text
+warehouse.load_stock_data()
+```
+
+The procedure:
+
+1. Identifies invalid OHLC records.
+2. Stores invalid records in `staging.data_quality_errors`.
+3. Filters invalid records.
+4. Maps dates to `dim_date`.
+5. Maps tickers to `dim_company`.
+6. Loads valid records into `fact_stock_prices`.
+7. Uses UPSERT behavior for existing company/date combinations.
+
+The fact load uses:
+
+```sql
+ON CONFLICT (date_key, company_key)
+DO UPDATE
+```
+
+This prevents duplicate fact records for the same company and trading date.
+
+---
+
+# 4.13 Dimension Mapping
+
+The staging data contains:
+
+```text
+date
+ticker
+```
+
+These are converted into warehouse keys.
+
+```text
+staging.date
+      |
+      v
+warehouse.dim_date
+      |
+      v
+date_key
+```
+
+and:
+
+```text
+staging.ticker
+      |
+      v
+warehouse.dim_company
+      |
+      v
+company_key
+```
+
+The resulting keys are stored in the fact table.
+
+---
+
+# 4.14 Final Warehouse Statistics
+
+After loading and validation:
+
+| Component           | Records |
+| ------------------- | ------: |
+| Staging records     | 619,040 |
+| Quarantined records |      12 |
+| `dim_date`          |   1,259 |
+| `dim_company`       |     505 |
+| `fact_stock_prices` | 619,017 |
+
+The fact table covers:
+
+```text
+First trading date: 2013-02-08
+Last trading date:  2018-02-07
+```
+
+It contains:
+
+```text
+505 companies
+1,259 trading dates
+619,017 fact records
+```
+
+---
+
+# 4.15 Warehouse Integrity Verification
+
+After the load, the warehouse was checked for invalid OHLC relationships.
+
+The validation checked:
+
+```text
+high_price < low_price
+```
+
+```text
+open_price < low_price
+```
+
+```text
+open_price > high_price
+```
+
+```text
+close_price < low_price
+```
+
+```text
+close_price > high_price
+```
+
+Final result:
+
+```text
+invalid_fact_rows = 0
+```
+
+This confirms that invalid OHLC records did not enter the warehouse fact table.
+
+---
+
+# 4.16 Analytics Layer
+
+The warehouse provides the foundation for analytical workloads.
+
+Implemented analytical queries include:
+
+```text
+analytics/daily_returns.sql
+analytics/monthly_performance.sql
+analytics/volatility.sql
+analytics/company_performance.sql
+analytics/market_summary.sql
+```
+
+These queries operate on the warehouse rather than directly on the original CSV dataset.
+
+This provides a clean separation between:
+
+```text
+Raw Data
+   |
+   v
+Staging
+   |
+   v
+Warehouse
+   |
+   v
+Analytics
+```
+
+---
+
+# 4.17 Indexing
+
+Indexes are used to improve warehouse query performance.
+
+Important indexes include:
+
+```text
+date_key
+company_key
+(company_key, date_key)
+```
+
+These support common analytical operations such as:
+
+* company filtering
+* date filtering
+* time-series queries
+* company/date joins
+* analytical aggregations
+
+---
+
+# 4.18 PostgreSQL Deployment on K3s
+
+The completed warehouse is deployed inside the K3s private cloud.
+
+```text
+K3s Cluster
+     |
+     v
+datawarehouse namespace
+     |
+     v
+PostgreSQL Deployment
+     |
+     v
+PostgreSQL Pod
+     |
+     v
+PersistentVolumeClaim
+```
+
+PostgreSQL configuration:
+
+```text
+Database: DataWarehouse
+Image: postgres:18
+Namespace: datawarehouse
+```
+
+The PostgreSQL workload uses a persistent volume claim:
+
+```text
+postgres-pvc
+```
+
+with:
+
+```text
+Storage: 20Gi
+StorageClass: local-path
+Access Mode: RWO
+```
+
+---
+
+# 4.19 Phase 4 Validation Summary
+
+The following objectives were successfully completed:
+
+* [x] S&P 500 dataset integrated
+* [x] ETL pipeline implemented
+* [x] Data transformation completed
+* [x] Staging layer implemented
+* [x] Data-quality validation implemented
+* [x] OHLC validation implemented
+* [x] Invalid records detected
+* [x] 12 invalid records quarantined
+* [x] Source data preserved
+* [x] Star schema implemented
+* [x] Date dimension populated
+* [x] Company dimension populated
+* [x] Fact table populated
+* [x] PostgreSQL constraints preserved
+* [x] UPSERT logic implemented
+* [x] Analytics queries created
+* [x] Warehouse indexes implemented
+* [x] PostgreSQL deployed on K3s
+* [x] Final warehouse validation completed
+* [x] Invalid fact rows verified as `0`
+
+---
+
+# 4.20 Final Result
+
+Phase 4 successfully transformed the project from a simple stock-data processing system into a **validated analytical data warehouse running inside a private Kubernetes cloud**.
+
+Final state:
+
+```text
+                 S&P 500 Data
+                      |
+                      v
+                    ETL
+                      |
+                      v
+                   Staging
+                      |
+              +-------+-------+
+              |               |
+           Valid           Invalid
+              |               |
+              v               v
+        Data Warehouse   Quality Errors
+              |
+              v
+          PostgreSQL
+              |
+              v
+             K3s
+              |
+              v
+        Private Cloud
+```
+
+### Phase 4 Status
+
+**COMPLETE**
+
+```text
+619,040 source records
+        |
+        v
+12 invalid records quarantined
+        |
+        v
+619,017 warehouse fact records
+        |
+        v
+0 invalid fact rows
+```
+
+The completed Phase 4 provides the data foundation for the next phase:
+
+
+

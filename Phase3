@@ -170,24 +170,37 @@ sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
 psql -U postgres -d datawarehouse -c \
 "\copy staging.stock_prices(date,open_price,high_price,low_price,close_price,volume,ticker) from '/tmp/stocks.csv' with (format csv,header true)"
 
+Checking wheather the data is present or not:-
+=============================================
 
-Querying inorder to check duplicate or problematic rows:-
-========================================================
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ '
+psql -U postgres -d DataWarehouse -c \
+"select count(*) as totla_records from staging.stock_prices;"
+
+Validation of data before inserting the `data` into `datawarehouse`:-
+==================================================================
 
 """
+
 sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
 psql -U postgres -d DataWarehouse -c \
-"SELECT date, open_price, high_price, low_price, close_price, volume, ticker
-FROM staging.stock_prices
-WHERE open_price IS NULL
-OR high_price IS NULL
-OR low_price IS NULL
-LIMIT 20;"
+"SELECT
+COUNT(*) FILTER (WHERE date IS NULL) AS null_date,
+COUNT(*) FILTER (WHERE open_price IS NULL) AS null_open,
+COUNT(*) FILTER (WHERE high_price IS NULL) AS null_high,
+COUNT(*) FILTER (WHERE low_price IS NULL) AS null_low,
+COUNT(*) FILTER (WHERE close_price IS NULL) AS null_close,
+COUNT(*) FILTER (WHERE volume IS NULL) AS null_volume,
+COUNT(*) FILTER (WHERE ticker IS NULL) AS null_ticker
+FROM staging.stock_prices;"
+
 """
 
-Schema inorder to create a warehouse.dim_date :-
-===============================================
+""" Note:- "ctrl+alt+f7" in-order to change the virtual-terminal to gui (graphical terminal) """
 
+
+Create The Dimension-Date in warehouse:-
+======================================
 """
 sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
 psql -U postgres -d DataWarehouse -c "
@@ -221,12 +234,274 @@ ON CONFLICT (date_key) DO NOTHING;
 "
 """
 
-Checking wheather the date_dimension is created or not in warehouse.dim_date:-
-============================================================================
+Checking wheather the data is inserted successful or not in datawarehouse ie.(warehouse.dim_date):-
+=================================================================================================
 
+"""
 sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
 psql -U postgres -d DataWarehouse -c \
-"select count(*) as date_dimension_total from warehouse.date_dimension;"
+"SELECT COUNT(*) AS date_dimension_rows FROM warehouse.dim_date;"
+"""
+
+Schema for creating dim_company in warehouse ie (warehouse.dim_company):-
+========================================================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c "
+INSERT INTO warehouse.dim_company (ticker)
+SELECT DISTINCT ticker
+FROM staging.stock_prices
+WHERE ticker IS NOT NULL
+ON CONFLICT (ticker) DO NOTHING;
+"
+"""
+
+Checking / Verification wheather the relation / dimension_table is created correctly or not:- 
+===========================================================================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"select count(*) as dim_company_total_rows from warehouse.dim_company"
+"""
+
+Inspecting few 'rows' or 'records':-
+===================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"select * from warehouse.dim_company order by company_key limit 10;"
+"""
+
+Schema/ Query inorder to create a fact_table with dimension_table's dim_date, dim_company:-
+==========================================================================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c "
+INSERT INTO warehouse.fact_stock_prices
+(
+    date_key,
+    company_key,
+    open_price,
+    high_price,
+    low_price,
+    close_price,
+    volume
+)
+SELECT
+    d.date_key,
+    c.company_key,
+    s.open_price,
+    s.high_price,
+    s.low_price,
+    s.close_price,
+    s.volume
+FROM staging.stock_prices s
+JOIN warehouse.dim_date d
+    ON d.full_date = s.date
+JOIN warehouse.dim_company c
+    ON c.ticker = s.ticker
+WHERE s.open_price IS NOT NULL
+  AND s.high_price IS NOT NULL
+  AND s.low_price IS NOT NULL
+  AND s.close_price IS NOT NULL
+  AND s.volume IS NOT NULL
+  AND s.open_price > 0
+  AND s.high_price > 0
+  AND s.low_price > 0
+  AND s.close_price > 0
+  AND s.volume >= 0
+  AND s.high_price >= s.low_price
+  AND s.high_price >= s.open_price
+  AND s.high_price >= s.close_price
+  AND s.low_price <= s.open_price
+  AND s.low_price <= s.close_price
+ON CONFLICT (date_key, company_key) DO NOTHING;
+"
+"""
+
+Checking / Verification of fact_table after the creation :-
+==========================================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"select count(*) as total_records_from_fact_table from warehouse.fact_stock_prices;"
+"""
+
+Query inorder to check the invalid records / rows:-
+=================================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c "
+SELECT COUNT(*) AS invalid_price_rows
+FROM staging.stock_prices
+WHERE open_price IS NULL
+   OR high_price IS NULL
+   OR low_price IS NULL
+   OR close_price IS NULL
+   OR volume IS NULL
+   OR high_price < low_price
+   OR high_price < open_price
+   OR high_price < close_price
+   OR low_price > open_price
+   OR low_price > close_price
+   OR open_price <= 0
+   OR high_price <= 0
+   OR low_price <= 0
+   OR close_price <= 0
+   OR volume < 0;
+"
+"""
+
+Note:- 
+"""
+--> Orphaned keys are data references, cryptographic credentials, or API tokens that remain active or stored in a system even though their parent record, owner, or connecting relationship no longer exists
+"""
+
+Query inorder to check the 'Orphaned Keys' in the warehouse:-
+============================================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c "
+SELECT
+    COUNT(*) AS orphaned_rows
+FROM warehouse.fact_stock_prices f
+LEFT JOIN warehouse.dim_date d
+    ON f.date_key = d.date_key
+LEFT JOIN warehouse.dim_company c
+    ON f.company_key = c.company_key
+WHERE d.date_key IS NULL
+   OR c.company_key IS NULL;
+"
+"""
+
+Query inorder to check the constraint violations:-
+================================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c "
+SELECT COUNT(*) AS constraint_violations
+FROM warehouse.fact_stock_prices
+WHERE open_price <= 0
+   OR high_price <= 0
+   OR low_price <= 0
+   OR close_price <= 0
+   OR volume < 0
+   OR high_price < low_price
+   OR high_price < open_price
+   OR high_price < close_price
+   OR low_price > open_price
+   OR low_price > close_price;
+"
+"""
+
+The constraint checking the shell that is related to postgres:-
+=============================================================
+
+"""
+	sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ 
+	psql -U postgres -d DataWarehouse  --> { This command open's the interactive shell of `Postgres SQL` }
+	
+	DataWarehouse#:- \d warehouse.fact_stock_prices --> {This the schema structure of fact_stock_prices ie(fact table)}
+
+	Validation of OHLC ( Open , High, Low , Close) Value's:-
+	======================================================
+
+"""
+    SELECT
+    date,
+    ticker,
+    open_price,
+    high_price,
+    low_price,
+    close_price
+    FROM staging.stock_prices
+    WHERE high_price < low_price
+    OR high_price < open_price
+    OR high_price < close_price
+    OR low_price > open_price
+    OR low_price > close_price
+    ORDER BY date, ticker;
+"""
+
+Counting:-
+========
+"""
+SELECT COUNT(*)
+FROM staging.stock_prices
+WHERE high_price < low_price
+   OR high_price < open_price
+   OR high_price < close_price
+   OR low_price > open_price
+   OR low_price > close_price;
+"""
+
+"""
+
+Validating the Raw Data (OHCL):-
+==============================
+
+"""
+Raw CSV
+   ↓
+Extract
+   ↓
+Transform
+   ↓
+Validate OHLC
+   ├── Valid rows ──→ Warehouse
+   │
+   └── Invalid rows ─→ Rejected/Quarantine
+"""
+
+Query to get Invalid rows --> Rejected/Quarantine:-
+=================================================
+
+"""
+	SELECT
+    date,
+    ticker,
+    open_price,
+    high_price,
+    low_price,
+    close_price,
+    CASE
+        WHEN high_price < low_price THEN 'HIGH < LOW'
+        WHEN high_price < open_price THEN 'HIGH < OPEN'
+        WHEN high_price < close_price THEN 'HIGH < CLOSE'
+        WHEN low_price > open_price THEN 'LOW > OPEN'
+        WHEN low_price > close_price THEN 'LOW > CLOSE'
+    END AS error
+FROM staging.stock_prices
+WHERE high_price < low_price
+   OR high_price < open_price
+   OR high_price < close_price
+   OR low_price > open_price
+   OR low_price > close_price
+ORDER BY date, ticker;
+"""
+
+Appending the new_file or schema or procedure:- 
+=============================================
+
+"""
+	sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+	psql -U postgres -d DataWarehouse < file_name.extentions
+"""
+
+Kubernetes deployment:-
+======================
+
+command:- sudo kubectl -n datawarehouse get deployment postgres -o yaml
+
+
 
 The structure of DataWareHouse( Alongside with records in the `DataWareHouse` ):-
 ===============================================================================
@@ -267,4 +542,17 @@ staging    warehouse    analytics
 """
 
 
+The Tree Structure of DataWareHouse:-
+====================================
 
+"""
+staging
+├── stock_prices
+├── data_quality_errors
+└── load_metadata
+
+warehouse
+├── dim_company
+├── dim_date
+└── fact_stock_prices
+"""
