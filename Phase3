@@ -66,3 +66,205 @@ K3s Cluster
     ├── PVC                   ✅ Bound
     ├── PV                    ✅ Bound
     └── local-path storage    ✅ 20 GiB
+
+Creation Postgres:- 
+=================
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -c "\l" --> It is used to get the schema for the existing datawarehouse 
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -c 'CREATE DATABASE "DataWareHouse";'
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ 
+psql -U postgres -d Datawarehouse -c "SELECT version();"
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ 
+psql -U postgres -d Datawarehouse -c "\dn"  ---> it is used to check the null value's 
+
+cd ~ git clone https://github.com/satishkumarpeddi/DataWareHousing
+
+cd DataWareHousing --> (find sql -maxdepth 1 -type f -print | sort)
+
+
+To look over the contant in the files --> (for f in sql/*.sql; do echo "=========== $f ========="; head -20 "$f"; done)
+
+"""
+
+sudo kubectl cp warehouse-schema.sql \
+datawarehouse/$(sudo kubectl get pod -n datawarehouse -l app=postgres -o jsonpath='{.items[0].metadata.name}'):/tmp/warehouse-schema.sql
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ psql -U postgres -d  DataWarehouse -f /tmp/warehouse-schema.sql --> (It is used to execute the schema)
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ psql -U postgres -d DataWarehouse -c "\dn"
+
+=================================================================
+/dt --> is for describe table's || /dv --> is for describe view's
+=================================================================
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ psql -U postgres -d DataWarehouse -c "\dt staging.*"
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ psql -U postgres -d DataWarehouse -c "\dt warehouse.*"
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ psql -U postgres -d DataWarehouse -c "\dv analytics.*" --> It is for view's
+
+
+Data-Loading Phase:-
+==================
+
+find ~ -name "stocks.csv" -type f 2> /dev/null --> (It is used to check wheather the file is present or not)
+
+
+
+The Next-PipeLine:-
+=================
+
+"""
+stocks.csv
+    ↓
+K3s PostgreSQL
+    ↓
+staging.stock_prices
+    ↓
+Data quality validation
+    ↓
+warehouse.dim_date
+warehouse.dim_company
+    ↓
+warehouse.fact_stock_prices
+    ↓
+analytics views
+"""
+
+head -2 ~/DataWareHousing/data/raw/stocks.csv
+
+wc ~/DataWareHousing/data/raw/stocks.csv
+
+Checking staging.stocks_price table/relation:-
+============================================
+
+sudo kubectl exec -it -n datawarehoue deploy/postgress -- \ 
+psql -U postgress -d DataWarehouse -c "\dt staging.stocks_prices"
+
+Copy the data --> staging.stocks_prices (relation):-
+==================================================
+
+sudo kubectl cp ~/DataWareHousing/data/raw/stocks.csv \ 
+datawarehouse/postgres-747d4b6d84-pj9l5:/tmp/stocks.csv
+
+Note:- "/tmp --> folder is used to check storage for temporary workload and the those will be removed after certain interval of time or
+with-in certain day period"
+
+
+Verification of data in-side the pod:-
+====================================
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+ls -lh /tmp/stocks.csv
+
+
+Copying the data from /tmp/stocks.csv to staging.stock_prices:- 
+=============================================================
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \ 
+psql -U postgres -d datawarehouse -c \
+"\copy staging.stock_prices(date,open_price,high_price,low_price,close_price,volume,ticker) from '/tmp/stocks.csv' with (format csv,header true)"
+
+
+Querying inorder to check duplicate or problematic rows:-
+========================================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"SELECT date, open_price, high_price, low_price, close_price, volume, ticker
+FROM staging.stock_prices
+WHERE open_price IS NULL
+OR high_price IS NULL
+OR low_price IS NULL
+LIMIT 20;"
+"""
+
+Schema inorder to create a warehouse.dim_date :-
+===============================================
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c "
+INSERT INTO warehouse.dim_date
+(
+    date_key,
+    full_date,
+    day_number,
+    day_name,
+    month_number,
+    month_name,
+    quarter_number,
+    year_number,
+    day_of_week,
+    is_weekend
+)
+SELECT DISTINCT
+    TO_CHAR(date, 'YYYYMMDD')::INTEGER,
+    date,
+    EXTRACT(DAY FROM date)::INTEGER,
+    TO_CHAR(date, 'Day'),
+    EXTRACT(MONTH FROM date)::INTEGER,
+    TO_CHAR(date, 'Month'),
+    EXTRACT(QUARTER FROM date)::INTEGER,
+    EXTRACT(YEAR FROM date)::INTEGER,
+    EXTRACT(DOW FROM date)::INTEGER,
+    EXTRACT(DOW FROM date)::INTEGER IN (0,6)
+FROM staging.stock_prices
+WHERE date IS NOT NULL
+ON CONFLICT (date_key) DO NOTHING;
+"
+"""
+
+Checking wheather the date_dimension is created or not in warehouse.dim_date:-
+============================================================================
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"select count(*) as date_dimension_total from warehouse.date_dimension;"
+
+The structure of DataWareHouse( Alongside with records in the `DataWareHouse` ):-
+===============================================================================
+
+"""
+	           K3s Private Cloud
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+        PostgreSQL Pod             Storage
+              │                    20 GiB
+              │
+       DataWarehouse DB
+        ┌─────┼─────┐
+        ↓     ↓     ↓
+    staging warehouse analytics
+        ↑
+        │
+    stocks.csv
+    619,040 rows
+"""
+
+
+The structure of DataWareHouse:-
+==============================
+Your completed DataWarehouse project
+              ↓
+        SQL schema files
+              ↓
+      K3s PostgreSQL
+       DataWarehouse
+              ↓
+ ┌────────────┼────────────┐
+ ↓            ↓            ↓
+staging    warehouse    analytics
+              ↓
+        S&P 500 data
+"""
+
+
+
