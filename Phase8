@@ -1,0 +1,2338 @@
+🚀 Phase 8 — CI/CD + Power BI:-
+=============================
+# Phase 8 — CI/CD Automation + Power BI Analytics
+
+## 1. Overview
+
+Phase 8 is the final phase of the **Private Cloud Data Warehouse Platform**.
+
+The objective of this phase is to automate the complete application lifecycle from source-code changes to deployment on the private K3s cluster and provide a business-intelligence layer using Microsoft Power BI.
+
+The final pipeline connects:
+
+```text
+Developer
+   │
+   ▼
+GitHub Repository
+   │
+   ▼
+GitHub Actions
+   │
+   ├── Test
+   ├── Validate
+   ├── Build Docker Image
+   ├── Push Image
+   │
+   ▼
+Container Registry
+   │
+   ▼
+K3s Private Cloud
+   │
+   ├── PostgreSQL
+   ├── ETL
+   └── Data Warehouse
+   │
+   ▼
+Power BI
+   │
+   ▼
+Analytics Dashboard
+```
+
+This phase transforms the project from a manually deployed data warehouse into a more complete **cloud-native private data platform**.
+
+---
+
+# 2. Phase 8 Objectives
+
+The major objectives are:
+
+1. Automate testing using GitHub Actions.
+2. Validate the ETL pipeline before deployment.
+3. Build Docker images automatically.
+4. Push container images to a container registry.
+5. Deploy updated containers to the K3s cluster.
+6. Verify successful Kubernetes deployment.
+7. Maintain reproducible deployments.
+8. Connect the warehouse analytics to Power BI.
+9. Build dashboards from warehouse data.
+10. Provide an end-to-end CI/CD workflow.
+
+---
+
+# 3. Prerequisites
+
+Before starting Phase 8, the following should already be operational.
+
+### Infrastructure
+
+* Ubuntu/Kali Linux nodes
+* K3s cluster
+* Kubernetes API server
+* kubectl
+* Working cluster networking
+* Persistent storage
+
+### Cluster
+
+Example cluster:
+
+```text
+cluster-master   192.168.1.7
+cluster-worker1  192.168.1.2
+cluster-worker2  192.168.1.3
+server4          192.168.1.8
+server5          192.168.1.4
+```
+
+The exact worker/server IPs may change depending on the current lab configuration.
+
+Verify the cluster:
+
+```bash
+sudo kubectl get nodes -o wide
+```
+
+Expected:
+
+```text
+NAME              STATUS   ROLES                  VERSION
+cluster-master    Ready    control-plane          v1.36.4+k3s1
+cluster-worker1   Ready    <none>                 v1.36.4+k3s1
+cluster-worker2   Ready    <none>                 v1.36.4+k3s1
+```
+
+---
+
+# 4. Verify K3s
+
+Check K3s:
+
+```bash
+sudo systemctl status k3s --no-pager -l
+```
+
+Check K3s version:
+
+```bash
+k3s --version
+```
+
+Check Kubernetes version:
+
+```bash
+sudo kubectl version
+```
+
+Check cluster information:
+
+```bash
+sudo kubectl cluster-info
+```
+
+Check all nodes:
+
+```bash
+sudo kubectl get nodes
+```
+
+Detailed node information:
+
+```bash
+sudo kubectl get nodes -o wide
+```
+
+---
+
+# 5. Verify Namespaces
+
+The Data Warehouse application uses the `datawarehouse` namespace.
+
+List namespaces:
+
+```bash
+sudo kubectl get namespaces
+```
+
+Check the namespace:
+
+```bash
+sudo kubectl get namespace datawarehouse
+```
+
+If the namespace does not exist:
+
+```bash
+sudo kubectl create namespace datawarehouse
+```
+
+Verify:
+
+```bash
+sudo kubectl get ns
+```
+
+---
+
+# 6. Verify Data Warehouse Deployment
+
+List all resources:
+
+```bash
+sudo kubectl get all -n datawarehouse
+```
+
+Check pods:
+
+```bash
+sudo kubectl get pods -n datawarehouse -o wide
+```
+
+Check deployments:
+
+```bash
+sudo kubectl get deployments -n datawarehouse
+```
+
+Check services:
+
+```bash
+sudo kubectl get services -n datawarehouse
+```
+
+Check persistent volumes:
+
+```bash
+sudo kubectl get pv
+```
+
+Check persistent volume claims:
+
+```bash
+sudo kubectl get pvc -n datawarehouse
+```
+
+---
+
+# 7. Verify PostgreSQL
+
+PostgreSQL is the primary database used by the Data Warehouse.
+
+Check PostgreSQL pods:
+
+```bash
+sudo kubectl get pods -n datawarehouse | grep postgres
+```
+
+Check PostgreSQL deployment:
+
+```bash
+sudo kubectl get deployment -n datawarehouse
+```
+
+Check PostgreSQL service:
+
+```bash
+sudo kubectl get svc -n datawarehouse
+```
+
+Describe the PostgreSQL pod:
+
+```bash
+sudo kubectl describe pod <postgres-pod-name> -n datawarehouse
+```
+
+View PostgreSQL logs:
+
+```bash
+sudo kubectl logs <postgres-pod-name> -n datawarehouse
+```
+
+---
+
+# 8. PostgreSQL Database Verification
+
+Enter the PostgreSQL container:
+
+```bash
+sudo kubectl exec -it <postgres-pod-name> -n datawarehouse -- bash
+```
+
+Depending on the PostgreSQL image, use:
+
+```bash
+psql -U postgres
+```
+
+Connect to the Data Warehouse:
+
+```sql
+\c DataWarehouse
+```
+
+List databases:
+
+```sql
+\l
+```
+
+List schemas:
+
+```sql
+\dn
+```
+
+List tables:
+
+```sql
+\dt
+```
+
+Exit PostgreSQL:
+
+```sql
+\q
+```
+
+Exit the container:
+
+```bash
+exit
+```
+
+---
+
+# 9. Data Warehouse Verification
+
+The warehouse contains dimension and fact tables.
+
+Check tables:
+
+```sql
+\dt
+```
+
+Example:
+
+```text
+dim_date
+dim_stock
+fact_stock_prices
+```
+
+Check table structure:
+
+```sql
+\d fact_stock_prices
+```
+
+Check row count:
+
+```sql
+SELECT COUNT(*) FROM fact_stock_prices;
+```
+
+Check stock dimension:
+
+```sql
+SELECT COUNT(*) FROM dim_stock;
+```
+
+Check date dimension:
+
+```sql
+SELECT COUNT(*) FROM dim_date;
+```
+
+Sample fact records:
+
+```sql
+SELECT *
+FROM fact_stock_prices
+LIMIT 10;
+```
+
+---
+
+# 10. Data Quality Verification
+
+The warehouse should satisfy the defined constraints.
+
+Example:
+
+```sql
+SELECT COUNT(*)
+FROM fact_stock_prices
+WHERE high_price < low_price;
+```
+
+Expected:
+
+```text
+0
+```
+
+Check invalid closing prices:
+
+```sql
+SELECT COUNT(*)
+FROM fact_stock_prices
+WHERE close_price <= 0;
+```
+
+Check invalid opening prices:
+
+```sql
+SELECT COUNT(*)
+FROM fact_stock_prices
+WHERE open_price <= 0;
+```
+
+Check NULL values:
+
+```sql
+SELECT COUNT(*)
+FROM fact_stock_prices
+WHERE ticker IS NULL;
+```
+
+The expected result for fields that are defined as NOT NULL is:
+
+```text
+0
+```
+
+---
+
+# 11. Git Repository Verification
+
+Move to the project directory:
+
+```bash
+cd ~/DataWareHousing
+```
+
+Check repository status:
+
+```bash
+git status
+```
+
+Check branches:
+
+```bash
+git branch
+```
+
+Check remote:
+
+```bash
+git remote -v
+```
+
+View recent commits:
+
+```bash
+git log --oneline --decorate --graph -10
+```
+
+Fetch latest changes:
+
+```bash
+git pull origin main
+```
+
+---
+
+# 12. Recommended Repository Structure
+
+The project can follow the following structure:
+
+```text
+DataWareHousing/
+│
+├── data/
+│   ├── raw/
+│   └── processed/
+│
+├── sql/
+│   ├── 01_database.sql
+│   ├── 02_schema.sql
+│   ├── 03_dimensions.sql
+│   ├── 04_fact_tables.sql
+│   ├── 05_constraints.sql
+│   ├── 06_views.sql
+│   ├── 07_queries.sql
+│   ├── 08_analytics.sql
+│   └── 09_indexes.sql
+│
+├── etl/
+│   ├── config/
+│   ├── extract/
+│   ├── transform/
+│   ├── validate/
+│   ├── load/
+│   ├── pipeline/
+│   └── logger/
+│
+├── tests/
+│
+├── analytics/
+│   ├── daily_returns/
+│   ├── monthly_performance/
+│   └── volatility/
+│
+├── k8s/
+│   ├── namespace.yaml
+│   ├── postgres-storage.yaml
+│   ├── postgres.yaml
+│   ├── etl.yaml
+│   ├── service.yaml
+│   └── configmap.yaml
+│
+├── docker/
+│   ├── Dockerfile
+│   └── requirements.txt
+│
+├── docs/
+│
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml
+│
+├── README.md
+└── requirements.txt
+```
+
+---
+
+# 13. CI/CD Architecture
+
+The CI/CD pipeline follows:
+
+```text
+Git Push
+   │
+   ▼
+GitHub
+   │
+   ▼
+GitHub Actions
+   │
+   ├── Checkout
+   │
+   ├── Install dependencies
+   │
+   ├── Run tests
+   │
+   ├── Validate ETL
+   │
+   ├── Build Docker image
+   │
+   ├── Push image
+   │
+   └── Deploy
+          │
+          ▼
+       K3s Cluster
+```
+
+---
+
+# 14. GitHub Actions
+
+GitHub Actions is used to automate the CI/CD process.
+
+Workflow files are stored under:
+
+```text
+.github/workflows/
+```
+
+Example:
+
+```text
+.github/workflows/ci-cd.yml
+```
+
+---
+
+# 15. Basic CI Workflow
+
+A simple CI workflow can be structured as:
+
+```yaml
+name: Data Warehouse CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          pytest
+```
+
+---
+
+# 16. CI Pipeline Explanation
+
+### Step 1 — Checkout
+
+```yaml
+uses: actions/checkout@v4
+```
+
+Downloads the repository source code into the GitHub Actions runner.
+
+---
+
+### Step 2 — Setup Python
+
+```yaml
+uses: actions/setup-python@v5
+```
+
+Provides the required Python environment.
+
+---
+
+### Step 3 — Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+Installs all Python dependencies required by the ETL system.
+
+---
+
+### Step 4 — Run Tests
+
+```bash
+pytest
+```
+
+Runs automated tests.
+
+The pipeline should fail if tests fail.
+
+This prevents broken code from progressing to deployment.
+
+---
+
+# 17. Docker Image Creation
+
+The ETL application can be containerized.
+
+Example Dockerfile:
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["python", "-m", "etl.pipeline"]
+```
+
+Build locally:
+
+```bash
+docker build -t datawarehouse-etl:latest .
+```
+
+List images:
+
+```bash
+docker images
+```
+
+Run locally:
+
+```bash
+docker run --rm datawarehouse-etl:latest
+```
+
+---
+
+# 18. Docker Image Tagging
+
+Instead of using only `latest`, production-oriented workflows should use unique tags.
+
+Example:
+
+```bash
+docker build \
+  -t username/datawarehouse-etl:latest \
+  -t username/datawarehouse-etl:v1.0.0 .
+```
+
+A Git commit SHA can also be used:
+
+```bash
+docker build \
+  -t username/datawarehouse-etl:${GITHUB_SHA} .
+```
+
+This makes every deployment traceable to a specific source-code version.
+
+---
+
+# 19. Container Registry
+
+The container image must be available to the K3s cluster.
+
+Possible registries include:
+
+* Docker Hub
+* GitHub Container Registry
+* A private registry inside the home lab
+
+Example Docker Hub login:
+
+```bash
+docker login
+```
+
+Push image:
+
+```bash
+docker push username/datawarehouse-etl:latest
+```
+
+Push versioned image:
+
+```bash
+docker push username/datawarehouse-etl:v1.0.0
+```
+
+---
+
+# 20. GitHub Container Registry
+
+For GitHub Container Registry:
+
+```bash
+echo "$CR_PAT" | docker login ghcr.io \
+  -u USERNAME \
+  --password-stdin
+```
+
+Build:
+
+```bash
+docker build \
+  -t ghcr.io/USERNAME/datawarehouse-etl:latest .
+```
+
+Push:
+
+```bash
+docker push ghcr.io/USERNAME/datawarehouse-etl:latest
+```
+
+---
+
+# 21. Kubernetes Deployment
+
+The Kubernetes ETL deployment should reference the container image.
+
+Example:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: datawarehouse-etl
+  namespace: datawarehouse
+
+spec:
+
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: datawarehouse-etl
+
+  template:
+
+    metadata:
+      labels:
+        app: datawarehouse-etl
+
+    spec:
+
+      containers:
+
+        - name: etl
+
+          image: username/datawarehouse-etl:latest
+
+          imagePullPolicy: Always
+
+          envFrom:
+            - configMapRef:
+                name: datawarehouse-config
+```
+
+---
+
+# 22. Apply Kubernetes Configuration
+
+Apply namespace:
+
+```bash
+sudo kubectl apply -f k8s/namespace.yaml
+```
+
+Apply storage:
+
+```bash
+sudo kubectl apply -f k8s/postgres-storage.yaml
+```
+
+Apply PostgreSQL:
+
+```bash
+sudo kubectl apply -f k8s/postgres.yaml
+```
+
+Apply configuration:
+
+```bash
+sudo kubectl apply -f k8s/configmap.yaml
+```
+
+Apply ETL:
+
+```bash
+sudo kubectl apply -f k8s/etl.yaml
+```
+
+---
+
+# 23. Verify Deployment
+
+Check deployment:
+
+```bash
+sudo kubectl get deployment -n datawarehouse
+```
+
+Check pods:
+
+```bash
+sudo kubectl get pods -n datawarehouse
+```
+
+Detailed pod information:
+
+```bash
+sudo kubectl get pods -n datawarehouse -o wide
+```
+
+Watch pods:
+
+```bash
+sudo kubectl get pods -n datawarehouse -w
+```
+
+---
+
+# 24. Verify ETL Container Image
+
+To verify which image is being used:
+
+```bash
+sudo kubectl get deployment datawarehouse-etl \
+  -n datawarehouse \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+Example:
+
+```text
+username/datawarehouse-etl:v1.0.0
+```
+
+This is an important CI/CD verification step.
+
+---
+
+# 25. Check ETL Logs
+
+Find ETL pod:
+
+```bash
+sudo kubectl get pods -n datawarehouse
+```
+
+Then:
+
+```bash
+sudo kubectl logs <etl-pod-name> -n datawarehouse
+```
+
+Follow logs:
+
+```bash
+sudo kubectl logs -f <etl-pod-name> -n datawarehouse
+```
+
+If the ETL is implemented as a Kubernetes Job:
+
+```bash
+sudo kubectl get jobs -n datawarehouse
+```
+
+Then:
+
+```bash
+sudo kubectl logs job/<job-name> -n datawarehouse
+```
+
+---
+
+# 26. Important Kubernetes Job Verification
+
+If the ETL uses a Job:
+
+```bash
+sudo kubectl get jobs -n datawarehouse
+```
+
+Check job details:
+
+```bash
+sudo kubectl describe job <job-name> -n datawarehouse
+```
+
+Check job status:
+
+```bash
+sudo kubectl get job <job-name> \
+  -n datawarehouse \
+  -o wide
+```
+
+A successful Job should show:
+
+```text
+COMPLETIONS   1/1
+```
+
+If the Job has already completed and Kubernetes cleanup is configured, it may no longer exist.
+
+For example:
+
+```bash
+sudo kubectl get job datawarehouse-etl -n datawarehouse
+```
+
+may return:
+
+```text
+Error from server (NotFound)
+```
+
+This does not automatically mean the ETL failed. Check the configured Job lifecycle and pod history.
+
+---
+
+# 27. Rolling Update
+
+When a new Docker image is available:
+
+```bash
+sudo kubectl set image deployment/datawarehouse-etl \
+  etl=username/datawarehouse-etl:v1.1.0 \
+  -n datawarehouse
+```
+
+Check rollout:
+
+```bash
+sudo kubectl rollout status \
+  deployment/datawarehouse-etl \
+  -n datawarehouse
+```
+
+Check rollout history:
+
+```bash
+sudo kubectl rollout history \
+  deployment/datawarehouse-etl \
+  -n datawarehouse
+```
+
+---
+
+# 28. Rollback
+
+If the deployment fails:
+
+```bash
+sudo kubectl rollout undo \
+  deployment/datawarehouse-etl \
+  -n datawarehouse
+```
+
+Check:
+
+```bash
+sudo kubectl rollout status \
+  deployment/datawarehouse-etl \
+  -n datawarehouse
+```
+
+This provides an important recovery mechanism.
+
+---
+
+# 29. CI/CD Deployment Verification Checklist
+
+After every deployment:
+
+```bash
+sudo kubectl get nodes
+```
+
+```bash
+sudo kubectl get pods -n datawarehouse
+```
+
+```bash
+sudo kubectl get deployments -n datawarehouse
+```
+
+```bash
+sudo kubectl get svc -n datawarehouse
+```
+
+```bash
+sudo kubectl get pvc -n datawarehouse
+```
+
+Then verify the image:
+
+```bash
+sudo kubectl get deployment datawarehouse-etl \
+  -n datawarehouse \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+Finally check logs:
+
+```bash
+sudo kubectl logs <etl-pod-name> -n datawarehouse
+```
+
+---
+
+# 30. Power BI Integration
+
+Power BI is used as the visualization and business-intelligence layer.
+
+The architecture is:
+
+```text
+K3s
+ │
+ └── PostgreSQL
+       │
+       ├── Dimension Tables
+       ├── Fact Tables
+       ├── Analytical Views
+       │
+       ▼
+    Power BI
+       │
+       ├── Data Model
+       ├── DAX
+       ├── Charts
+       └── Dashboard
+```
+
+---
+
+# 31. Power BI Data Sources
+
+The main data source is PostgreSQL.
+
+Typical analytical data includes:
+
+```text
+Ticker
+Date
+Open Price
+High Price
+Low Price
+Close Price
+Volume
+Daily Return
+Monthly Performance
+Volatility
+```
+
+---
+
+# 32. PostgreSQL Connectivity
+
+For Power BI Desktop, the PostgreSQL server must be reachable from the machine running Power BI.
+
+Verify PostgreSQL service:
+
+```bash
+sudo kubectl get svc -n datawarehouse
+```
+
+Example:
+
+```text
+NAME        TYPE        CLUSTER-IP     PORT
+postgres    ClusterIP   10.x.x.x       5432
+```
+
+A `ClusterIP` service is normally accessible only inside the Kubernetes cluster.
+
+Therefore, Power BI running outside K3s requires an appropriate access method.
+
+Possible methods include:
+
+1. NodePort
+2. LoadBalancer
+3. Port forwarding
+4. VPN
+5. Private network routing
+6. PostgreSQL exposed through a controlled private endpoint
+
+---
+
+# 33. Temporary PostgreSQL Port Forwarding
+
+For local testing, port forwarding can be used.
+
+```bash
+sudo kubectl port-forward \
+  svc/postgres \
+  5432:5432 \
+  -n datawarehouse
+```
+
+Keep this terminal running.
+
+Power BI can then connect to:
+
+```text
+Server: localhost
+Port: 5432
+```
+
+The port-forward process must remain active.
+
+This method is suitable for development/testing rather than permanent production access.
+
+---
+
+# 34. Power BI PostgreSQL Connection
+
+In Power BI Desktop:
+
+```text
+Home
+  ↓
+Get Data
+  ↓
+PostgreSQL database
+```
+
+Enter:
+
+```text
+Server: localhost
+Database: DataWarehouse
+```
+
+Then authenticate using the PostgreSQL credentials.
+
+Select the required tables/views.
+
+---
+
+# 35. Recommended Power BI Data Model
+
+A star schema is recommended.
+
+```text
+                  dim_date
+                     │
+                     │
+                     ▼
+dim_stock ─────► fact_stock_prices
+                     │
+                     │
+                     ▼
+              Analytical Views
+                     │
+                     ▼
+                  Power BI
+```
+
+Fact table:
+
+```text
+fact_stock_prices
+```
+
+Dimension tables:
+
+```text
+dim_date
+dim_stock
+```
+
+This provides a clean analytical structure.
+
+---
+
+# 36. Useful SQL Views for Power BI
+
+Example daily return view:
+
+```sql
+CREATE OR REPLACE VIEW vw_daily_returns AS
+SELECT
+    ticker,
+    trade_date,
+    close_price,
+    LAG(close_price)
+        OVER (
+            PARTITION BY ticker
+            ORDER BY trade_date
+        ) AS previous_close
+FROM fact_stock_prices;
+```
+
+Daily return calculation:
+
+```sql
+SELECT
+    ticker,
+    trade_date,
+    close_price,
+    previous_close,
+    ((close_price - previous_close) / previous_close) * 100
+        AS daily_return
+FROM vw_daily_returns;
+```
+
+---
+
+# 37. Monthly Performance Query
+
+Example:
+
+```sql
+SELECT
+    ticker,
+    DATE_TRUNC('month', trade_date) AS month,
+    MIN(close_price) AS opening_value,
+    MAX(close_price) AS closing_value
+FROM fact_stock_prices
+GROUP BY
+    ticker,
+    DATE_TRUNC('month', trade_date);
+```
+
+---
+
+# 38. Volume Analysis
+
+```sql
+SELECT
+    ticker,
+    SUM(volume) AS total_volume,
+    AVG(volume) AS average_volume
+FROM fact_stock_prices
+GROUP BY ticker
+ORDER BY total_volume DESC;
+```
+
+---
+
+# 39. Price Statistics
+
+```sql
+SELECT
+    ticker,
+    MIN(low_price) AS minimum_price,
+    MAX(high_price) AS maximum_price,
+    AVG(close_price) AS average_close
+FROM fact_stock_prices
+GROUP BY ticker;
+```
+
+---
+
+# 40. Power BI Dashboard
+
+The Power BI dashboard can contain:
+
+### KPI Cards
+
+* Total Stocks
+* Total Trading Records
+* Average Closing Price
+* Total Trading Volume
+* Maximum Price
+* Minimum Price
+
+### Charts
+
+* Closing price over time
+* Daily returns
+* Monthly performance
+* Trading volume
+* Stock comparison
+* Volatility
+* Top-performing stocks
+* Worst-performing stocks
+
+### Filters
+
+* Ticker
+* Date
+* Year
+* Month
+
+---
+
+# 41. Suggested Dashboard Layout
+
+```text
++------------------------------------------------------+
+|              S&P 500 DATA WAREHOUSE                  |
++------------------------------------------------------+
+| Total Stocks | Records | Avg Price | Total Volume   |
++------------------------------------------------------+
+|                                                      |
+|              Closing Price Trend                    |
+|                                                      |
++----------------------------+-------------------------+
+| Daily Returns              | Monthly Performance    |
+|                            |                         |
++----------------------------+-------------------------+
+| Volume Analysis            | Volatility Analysis    |
+|                            |                         |
++----------------------------+-------------------------+
+|              Stock / Date Filters                    |
++------------------------------------------------------+
+```
+
+---
+
+# 42. Power BI DAX Measures
+
+Example total records:
+
+```DAX
+Total Records =
+COUNTROWS(fact_stock_prices)
+```
+
+Total volume:
+
+```DAX
+Total Volume =
+SUM(fact_stock_prices[volume])
+```
+
+Average closing price:
+
+```DAX
+Average Close =
+AVERAGE(fact_stock_prices[close_price])
+```
+
+Maximum price:
+
+```DAX
+Maximum Price =
+MAX(fact_stock_prices[high_price])
+```
+
+Minimum price:
+
+```DAX
+Minimum Price =
+MIN(fact_stock_prices[low_price])
+```
+
+---
+
+# 43. Daily Return DAX
+
+Example:
+
+```DAX
+Daily Return % =
+DIVIDE(
+    [Current Close] - [Previous Close],
+    [Previous Close]
+) * 100
+```
+
+The exact implementation should be adjusted according to the Power BI data model.
+
+---
+
+# 44. CI/CD Security
+
+Secrets must never be committed to GitHub.
+
+Do NOT store:
+
+```text
+PostgreSQL passwords
+GitHub tokens
+Docker registry passwords
+SSH private keys
+Kubernetes credentials
+API keys
+```
+
+inside:
+
+```text
+.py
+.yaml
+.yml
+.env
+README.md
+```
+
+Instead use GitHub Secrets.
+
+---
+
+# 45. GitHub Secrets
+
+Navigate to:
+
+```text
+Repository
+→ Settings
+→ Secrets and variables
+→ Actions
+```
+
+Possible secrets:
+
+```text
+DOCKER_USERNAME
+DOCKER_PASSWORD
+POSTGRES_USER
+POSTGRES_PASSWORD
+REGISTRY_TOKEN
+KUBE_CONFIG
+```
+
+The actual secret names depend on the implementation.
+
+---
+
+# 46. Environment Variables
+
+Example:
+
+```yaml
+env:
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: DataWarehouse
+```
+
+Sensitive values should be supplied through Kubernetes Secrets.
+
+---
+
+# 47. Kubernetes Secret
+
+Example:
+
+```bash
+sudo kubectl create secret generic postgres-secret \
+  -n datawarehouse \
+  --from-literal=POSTGRES_USER=postgres \
+  --from-literal=POSTGRES_PASSWORD='YOUR_PASSWORD'
+```
+
+Verify:
+
+```bash
+sudo kubectl get secrets -n datawarehouse
+```
+
+Do not print secret values in logs.
+
+---
+
+# 48. End-to-End CI/CD Flow
+
+The complete workflow is:
+
+### Step 1
+
+Developer modifies source code.
+
+```bash
+git add .
+```
+
+### Step 2
+
+Commit:
+
+```bash
+git commit -m "Update ETL pipeline"
+```
+
+### Step 3
+
+Push:
+
+```bash
+git push origin main
+```
+
+### Step 4
+
+GitHub Actions starts automatically.
+
+### Step 5
+
+Dependencies are installed.
+
+### Step 6
+
+Tests execute:
+
+```bash
+pytest
+```
+
+### Step 7
+
+Docker image is built:
+
+```bash
+docker build ...
+```
+
+### Step 8
+
+Image is pushed to the registry.
+
+### Step 9
+
+Kubernetes receives the new image.
+
+### Step 10
+
+K3s creates/replaces the workload.
+
+### Step 11
+
+Deployment status is checked.
+
+### Step 12
+
+ETL loads/transforms data.
+
+### Step 13
+
+PostgreSQL stores the warehouse data.
+
+### Step 14
+
+Power BI reads analytical data.
+
+---
+
+# 49. Complete Verification Sequence
+
+After deployment, execute:
+
+```bash
+sudo kubectl get nodes
+```
+
+```bash
+sudo kubectl get pods -n datawarehouse -o wide
+```
+
+```bash
+sudo kubectl get deployments -n datawarehouse
+```
+
+```bash
+sudo kubectl get svc -n datawarehouse
+```
+
+```bash
+sudo kubectl get pvc -n datawarehouse
+```
+
+```bash
+sudo kubectl get pv
+```
+
+Then inspect logs:
+
+```bash
+sudo kubectl logs <pod-name> -n datawarehouse
+```
+
+Verify image:
+
+```bash
+sudo kubectl get deployment datawarehouse-etl \
+  -n datawarehouse \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+Verify PostgreSQL:
+
+```bash
+sudo kubectl exec -it <postgres-pod-name> \
+  -n datawarehouse -- psql -U postgres -d DataWarehouse
+```
+
+Then:
+
+```sql
+SELECT COUNT(*) FROM fact_stock_prices;
+```
+
+---
+
+# 50. Final Cluster Health Check
+
+Run:
+
+```bash
+sudo kubectl get nodes
+```
+
+```bash
+sudo kubectl get pods --all-namespaces
+```
+
+```bash
+sudo kubectl get pv
+```
+
+```bash
+sudo kubectl get pvc -A
+```
+
+Check problematic pods:
+
+```bash
+sudo kubectl get pods -A | grep -v Running
+```
+
+Check cluster events:
+
+```bash
+sudo kubectl get events -A --sort-by=.lastTimestamp
+```
+
+---
+
+# 51. Troubleshooting
+
+## Problem 1 — Pod is Pending
+
+Check:
+
+```bash
+sudo kubectl get pods -n datawarehouse
+```
+
+Then:
+
+```bash
+sudo kubectl describe pod <pod-name> -n datawarehouse
+```
+
+Check PVC:
+
+```bash
+sudo kubectl get pvc -n datawarehouse
+```
+
+Check PV:
+
+```bash
+sudo kubectl get pv
+```
+
+---
+
+# 52. Problem 2 — ImagePullBackOff
+
+Check:
+
+```bash
+sudo kubectl describe pod <pod-name> -n datawarehouse
+```
+
+Verify image:
+
+```bash
+sudo kubectl get deployment datawarehouse-etl \
+  -n datawarehouse \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+Test image manually:
+
+```bash
+docker pull username/datawarehouse-etl:latest
+```
+
+For a private registry, verify the Kubernetes image pull secret.
+
+---
+
+# 53. Problem 3 — CrashLoopBackOff
+
+Check logs:
+
+```bash
+sudo kubectl logs <pod-name> -n datawarehouse
+```
+
+Previous container logs:
+
+```bash
+sudo kubectl logs <pod-name> \
+  -n datawarehouse \
+  --previous
+```
+
+Describe pod:
+
+```bash
+sudo kubectl describe pod <pod-name> -n datawarehouse
+```
+
+Common causes:
+
+* Invalid environment variables
+* Database unavailable
+* Wrong PostgreSQL hostname
+* Incorrect credentials
+* Missing Python dependency
+* Application exception
+* Incorrect container command
+
+---
+
+# 54. Problem 4 — PostgreSQL Connection Failure
+
+Check service:
+
+```bash
+sudo kubectl get svc -n datawarehouse
+```
+
+Check endpoints:
+
+```bash
+sudo kubectl get endpoints -n datawarehouse
+```
+
+Check PostgreSQL pod:
+
+```bash
+sudo kubectl get pods -n datawarehouse
+```
+
+Check logs:
+
+```bash
+sudo kubectl logs <postgres-pod-name> -n datawarehouse
+```
+
+Test DNS from another pod:
+
+```bash
+sudo kubectl exec -it <etl-pod-name> \
+  -n datawarehouse -- \
+  getent hosts postgres
+```
+
+---
+
+# 55. Problem 5 — Kubernetes API Connection Refused
+
+Check:
+
+```bash
+sudo systemctl status k3s --no-pager -l
+```
+
+Check logs:
+
+```bash
+sudo journalctl -u k3s -n 100 --no-pager
+```
+
+Restart:
+
+```bash
+sudo systemctl restart k3s
+```
+
+Check:
+
+```bash
+sudo kubectl get nodes
+```
+
+---
+
+# 56. Problem 6 — No Default Route
+
+If K3s reports:
+
+```text
+no default routes found
+```
+
+check:
+
+```bash
+ip route
+```
+
+Expected to contain a default route similar to:
+
+```text
+default via 192.168.1.1 dev <interface>
+```
+
+Check interfaces:
+
+```bash
+ip addr
+```
+
+Check NetworkManager:
+
+```bash
+nmcli device status
+```
+
+Check connections:
+
+```bash
+nmcli connection show
+```
+
+---
+
+# 57. Problem 7 — Power BI Cannot Connect
+
+Verify PostgreSQL:
+
+```bash
+sudo kubectl get pods -n datawarehouse
+```
+
+Verify service:
+
+```bash
+sudo kubectl get svc -n datawarehouse
+```
+
+For temporary local access:
+
+```bash
+sudo kubectl port-forward \
+  svc/postgres 5432:5432 \
+  -n datawarehouse
+```
+
+Then test PostgreSQL from the Power BI machine.
+
+---
+
+# 58. Git Commands Used in Phase 8
+
+Check status:
+
+```bash
+git status
+```
+
+Add changes:
+
+```bash
+git add .
+```
+
+Commit:
+
+```bash
+git commit -m "Implement Phase 8 CI/CD and Power BI"
+```
+
+Push:
+
+```bash
+git push origin main
+```
+
+Pull:
+
+```bash
+git pull origin main
+```
+
+View history:
+
+```bash
+git log --oneline --graph --decorate
+```
+
+Create branch:
+
+```bash
+git checkout -b phase-8-cicd
+```
+
+Merge:
+
+```bash
+git checkout main
+git merge phase-8-cicd
+```
+
+---
+
+# 59. Recommended Phase 8 Commit Structure
+
+Example commits:
+
+```text
+feat: add GitHub Actions CI pipeline
+feat: containerize ETL application
+feat: add Docker image publishing
+feat: add Kubernetes deployment automation
+feat: add Power BI analytics
+docs: document phase 8
+```
+
+This makes the repository history easier to understand.
+
+---
+
+# 60. Security Checklist
+
+Before considering Phase 8 complete:
+
+```text
+[ ] No passwords committed
+[ ] No API keys committed
+[ ] No SSH private keys committed
+[ ] GitHub Secrets configured
+[ ] Kubernetes Secrets configured
+[ ] Docker images versioned
+[ ] CI tests enabled
+[ ] Failed tests stop deployment
+[ ] PostgreSQL access restricted
+[ ] Power BI access controlled
+[ ] Kubernetes permissions reviewed
+```
+
+---
+
+# 61. Performance and Reliability Checklist
+
+```text
+[ ] PostgreSQL persistent storage enabled
+[ ] PVC is Bound
+[ ] K3s nodes are Ready
+[ ] ETL container starts successfully
+[ ] ETL logs contain no critical errors
+[ ] Database contains expected records
+[ ] Constraints pass
+[ ] Analytical queries execute successfully
+[ ] Power BI refresh works
+[ ] Rollback procedure tested
+```
+
+---
+
+# 62. Final Phase 8 Validation
+
+Run the following commands as the final validation.
+
+### Kubernetes
+
+```bash
+sudo kubectl get nodes -o wide
+```
+
+### Workloads
+
+```bash
+sudo kubectl get all -n datawarehouse
+```
+
+### Storage
+
+```bash
+sudo kubectl get pv
+```
+
+```bash
+sudo kubectl get pvc -n datawarehouse
+```
+
+### ETL image
+
+```bash
+sudo kubectl get deployment datawarehouse-etl \
+  -n datawarehouse \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+### ETL logs
+
+```bash
+sudo kubectl logs <etl-pod-name> -n datawarehouse
+```
+
+### Database
+
+```bash
+sudo kubectl exec -it <postgres-pod-name> \
+  -n datawarehouse -- \
+  psql -U postgres -d DataWarehouse
+```
+
+Then:
+
+```sql
+SELECT COUNT(*) FROM fact_stock_prices;
+```
+
+Check data quality:
+
+```sql
+SELECT COUNT(*)
+FROM fact_stock_prices
+WHERE high_price < low_price;
+```
+
+Expected:
+
+```text
+0
+```
+
+Exit:
+
+```sql
+\q
+```
+
+---
+
+# 63. Phase 8 Completion Criteria
+
+Phase 8 is considered complete when:
+
+```text
+✓ GitHub repository is maintained using Git
+✓ CI workflow executes automatically
+✓ Automated tests execute successfully
+✓ ETL application can be containerized
+✓ Docker image can be built successfully
+✓ Container image can be published
+✓ K3s can run the container
+✓ Kubernetes deployment can be verified
+✓ ETL can communicate with PostgreSQL
+✓ Data is successfully stored in the warehouse
+✓ Warehouse constraints pass
+✓ Analytical queries execute successfully
+✓ Power BI can consume warehouse data
+✓ Dashboard visualizations are available
+✓ Deployment can be rolled back
+✓ Secrets are not exposed
+```
+
+---
+
+# 64. Complete Project Architecture
+
+After completing all eight phases, the project architecture becomes:
+
+```text
+                         ┌─────────────────────┐
+                         │      Developer      │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │       GitHub        │
+                         │    Source Control   │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │   GitHub Actions    │
+                         │       CI/CD         │
+                         └──────────┬──────────┘
+                                    │
+                       ┌────────────┴────────────┐
+                       │                         │
+                       ▼                         ▼
+                ┌──────────────┐        ┌──────────────┐
+                │   Automated  │        │    Docker    │
+                │    Tests     │        │    Build     │
+                └──────────────┘        └──────┬───────┘
+                                               │
+                                               ▼
+                                      ┌─────────────────┐
+                                      │ Container       │
+                                      │ Registry        │
+                                      └────────┬────────┘
+                                               │
+                                               ▼
+                  ┌──────────────────────────────────────────┐
+                  │              Private Cloud               │
+                  │                                          │
+                  │                  K3s                     │
+                  │                                          │
+                  │   ┌───────────┐     ┌───────────────┐   │
+                  │   │ ETL       │────►│ PostgreSQL    │   │
+                  │   │ Container │     │ DataWarehouse │   │
+                  │   └───────────┘     └───────┬───────┘   │
+                  │                              │           │
+                  └──────────────────────────────┼───────────┘
+                                                 │
+                                                 ▼
+                                      ┌─────────────────────┐
+                                      │      Power BI       │
+                                      │                     │
+                                      │ Dashboards & KPIs   │
+                                      └─────────────────────┘
+```
+
+---
+
+# 65. Final Outcome
+
+With Phase 8 completed, the project demonstrates a complete private-cloud data engineering workflow.
+
+The system combines:
+
+```text
+Data Engineering
+       +
+PostgreSQL
+       +
+ETL
+       +
+Docker
+       +
+Kubernetes / K3s
+       +
+Private Cloud
+       +
+CI/CD
+       +
+Power BI
+```
+
+The resulting platform demonstrates how raw financial-market data can be transformed into a production-style analytical system.
+
+The complete lifecycle is:
+
+```text
+Raw S&P 500 Data
+       ↓
+Extraction
+       ↓
+Transformation
+       ↓
+Validation
+       ↓
+Loading
+       ↓
+PostgreSQL Data Warehouse
+       ↓
+Dockerized ETL
+       ↓
+K3s Private Cloud
+       ↓
+CI/CD Automation
+       ↓
+Analytical Views
+       ↓
+Power BI
+       ↓
+Business Intelligence
+```
+
+---
+
+# 66. Project Completion Statement
+
+**Phase 8 completes the Private Cloud Data Warehouse project by connecting source control, automated testing, containerization, Kubernetes deployment, PostgreSQL data warehousing, and Power BI analytics into a unified workflow.**
+
+The project therefore demonstrates practical experience in:
+
+* Data Engineering
+* ETL Development
+* PostgreSQL
+* SQL
+* Python
+* Docker
+* Kubernetes
+* K3s
+* Linux System Administration
+* Private Cloud Infrastructure
+* CI/CD
+* GitHub Actions
+* Container Deployment
+* Data Quality
+* Business Intelligence
+* Power BI
+* Monitoring and Troubleshooting
+* Infrastructure Automation
+
+---
+
+# 67. Final Verification Command Sheet
+
+For quick reference:
+
+```bash
+# Cluster
+sudo kubectl get nodes -o wide
+
+# All Data Warehouse resources
+sudo kubectl get all -n datawarehouse
+
+# Pods
+sudo kubectl get pods -n datawarehouse -o wide
+
+# Deployments
+sudo kubectl get deployments -n datawarehouse
+
+# Services
+sudo kubectl get svc -n datawarehouse
+
+# Storage
+sudo kubectl get pv
+sudo kubectl get pvc -n datawarehouse
+
+# Jobs
+sudo kubectl get jobs -n datawarehouse
+
+# ETL image
+sudo kubectl get deployment datawarehouse-etl \
+  -n datawarehouse \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+# Logs
+sudo kubectl logs <etl-pod-name> -n datawarehouse
+
+# Rollout
+sudo kubectl rollout status \
+  deployment/datawarehouse-etl \
+  -n datawarehouse
+
+# Rollout history
+sudo kubectl rollout history \
+  deployment/datawarehouse-etl \
+  -n datawarehouse
+
+# Cluster events
+sudo kubectl get events -A --sort-by=.lastTimestamp
+
+# Git
+git status
+git log --oneline --graph --decorate -10
+git push origin main
+```
+
+---
+
+# Phase 8 Status
+
+```text
+╔══════════════════════════════════════════════════════╗
+║                 PHASE 8 — COMPLETE                   ║
+╠══════════════════════════════════════════════════════╣
+║ CI/CD                         ✓                      ║
+║ GitHub Actions                ✓                      ║
+║ Docker Containerization       ✓                      ║
+║ Kubernetes Deployment         ✓                      ║
+║ K3s Private Cloud             ✓                      ║
+║ PostgreSQL Data Warehouse     ✓                      ║
+║ ETL Pipeline                  ✓                      ║
+║ Data Validation               ✓                      ║
+║ Power BI Analytics            ✓                      ║
+║ Documentation                 ✓                      ║
+╚══════════════════════════════════════════════════════╝
+```
+
+## Final Project
+
+**Private Cloud S&P 500 Data Warehouse**
+
+A cloud-native data engineering platform that extracts, transforms, validates, and loads S&P 500 market data into PostgreSQL, deploys the ETL and warehouse workloads on a K3s-based private cloud, automates application delivery through CI/CD, and exposes analytical insights through Power BI.
+
+
