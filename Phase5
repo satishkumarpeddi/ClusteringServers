@@ -1,0 +1,211 @@
+Phase5 - Storage & Recovery:-
+===========================
+
+RoadMap:-
+=======
+
+"""
+5.1 Verify PVC/PV
+      ↓
+5.2 Verify PostgreSQL data on persistent storage
+      ↓
+5.3 Test pod failure & automatic recovery
+      ↓
+5.4 Verify data after recovery
+      ↓
+5.5 Create PostgreSQL backup
+      ↓
+5.6 Test restore
+      ↓
+5.7 Document Recovery Procedure
+"""
+
+5.1 Verify Presistent Storage:-
+=============================
+
+"""
+
+""
+📝 PersistentVolumeClaim (PVC)A PVC is a request for storage by a developer or an application. When a database like PostgreSQL needs to store data, you don't point it directly to a physical hard drive. Instead, you create a PVC that describes what kind of storage you need.
+""
+
+"""
+
+"""
+
+""
+📦 PersistentVolume (PV)A PV is the actual storage resource in the cluster. It represents a physical piece of storage—like a cloud drive (AWS EBS, Google Persistent Disk), an NFS share, or a local hard drive—that an administrator has provisioned.
+""
+
+"""
+
+commands:-
+"""	
+	sudo kubectl get pvc -n datawarehouse
+	sudo kubectl get pod -n datawarehouse -o wide
+	sudo kubectl get pv 
+"""
+
+STEP 5.2 — Verify the actual database is on the PVC:-
+===================================================
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"select count(*) as fact_stock_prices_total from warehouse.fact_stock_prices;
+"""
+
+"""
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"SELECT COUNT(*) AS invalid_rows FROM staging.data_quality_errors;"
+"""
+
+
+STEP 5.3 — PostgreSQL Pod Failure & Recovery Test:-
+=================================================
+
+commands:-
+"""
+	sudo kubectl get pod -n datawarehouse
+	sudo kubectl get delete pod -n datawarehouse postgres-747d4b6d84-q7r44
+	sudo kubectl get pods -n datawarehouse -w
+"""
+
+The above commands is used to stimulate the Pod failure in Postgres-SQL
+
+"""
+      OLD POD
+postgres-747d4b6d84-q7r44
+        ↓
+     DELETED
+        ↓
+Kubernetes Deployment
+        ↓
+NEW POD
+postgres-747d4b6d84-7jbwq
+        ↓
+    1/1 Running
+"""
+
+
+STEP 5.4 — Verify Data Survived:-
+===============================
+
+commands:-
+"""
+	--> sudo kubectl exec -it -n datawarehouse -- \
+            psql -U postgres -d DataWarehouse -c \
+	    "select count(*) as fact_stock_prices_total_records from warehouse.fact_stock_pric
+             es"
+  
+	--> sudo kubectl exec -it -n datawarehouse -- \
+	    psql -U postgres -d DataWarehouse -c \
+	    "select count(*) as data_quality_errors from staging.data_quality_errors"
+
+"""
+
+"""
+BEFORE POD FAILURE
+────────────────────────
+fact_stock_prices       619,017
+data_quality_errors          12
+PVC                     Bound
+        ↓
+PostgreSQL pod deleted
+        ↓
+Kubernetes recreated pod
+        ↓
+PVC reattached
+        ↓
+AFTER POD FAILURE
+────────────────────────
+fact_stock_prices       619,017 ✅
+data_quality_errors          12 ✅
+"""
+
+STEP 5.5 — Create a PostgreSQL Backup:-
+=====================================
+
+commands:-
+========
+
+"""
+	mkdir -p ~/DataWarehousing/backups
+	
+	sudo kubectl exec -it -n datawarehouse -- \
+	pg_dump -U postgres -d DataWarehouse -Fc > ~/DataWarehousing/backups/DataWarehouse_backups.dump
+	
+	du -h ~/DataWarehousing/backups/DataWarehouse_backup.dump --> Result 22M
+"""
+
+STEP 5.6 — Verify the Backup:-
+============================
+
+commands:-
+
+"""
+	pg_restore -l ~/DataWareHousing/backups/DataWarehouse_backup.dump | head -30 
+"""
+
+"""
+sudo kubectl cp ~/DataWareHousing/backups/DataWarehouse_backup.dump \
+datawarehouse/$(sudo kubectl get pod -n datawarehouse -o jsonpath='{.items[0].metadata.name}'):/tmp/DataWarehouse_backup.dump
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+ls -lh /tmp/DataWarehouse_backup.dump
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+pg_restore -l /tmp/DataWarehouse_backup.dump | head -30
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+pg_restore -l /tmp/DataWarehouse_backup.dump | \
+grep -E "fact_stock_prices|dim_company|dim_date"
+"""
+
+STEP 5.7 — Create Recovery Test Database:-
+========================================
+
+"""
+	sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+	psql -U postgres -d postgres -c \
+	"create database \"DataWarehouse_RecoveryTest\";"
+"""
+
+
+"""
+	sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+	pg_restore -U postgres -d DataWarehouse_RecoveryTest \ 
+	--clean --if-exists \
+	/tmp/DataWarehouse/DataWarehouse_backup.dump
+
+	sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+	psql -U postgres -d DataWarehouse_RecoveryTest -c \
+	"select count(*) as fact_stock_prices_total_records from warehouse.fact_stock_prices;"
+	
+	sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse_RecoveryTest -c \
+"SELECT
+ (SELECT COUNT(*) FROM warehouse.dim_company) AS companies,
+ (SELECT COUNT(*) FROM warehouse.dim_date) AS dates,
+ (SELECT COUNT(*) FROM warehouse.fact_stock_prices) AS fact_rows,
+ (SELECT COUNT(*) FROM staging.data_quality_errors) AS quality_errors;"
+"""
+
+Removing the temp database:- 
+==========================
+
+"""
+	sudo kubectl exec -it -n datawarehouse deploy/postgers -- \
+	psql -U postgres -d postgres -c \
+	"drop database \"DataWarehouse_RecoveryTest\";"
+
+	Removing the /tmp/DataWarehouse_backup.dump:-
+	===========================================
+
+	"""
+		sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+		rm -f /tmp/DataWarehouse_backup.dump
+	"""	
+"""

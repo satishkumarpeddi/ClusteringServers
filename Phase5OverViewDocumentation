@@ -1,0 +1,601 @@
+# Phase 5 — Storage & Recovery
+
+## Overview
+
+Phase 5 focused on making the PostgreSQL data warehouse resilient to pod failures and establishing a reliable database backup and recovery mechanism.
+
+The objective was not only to deploy PostgreSQL on the K3s cluster, but also to prove that the warehouse data remains available after infrastructure-level failures and can be restored independently from a PostgreSQL backup.
+
+The recovery architecture implemented in this phase consists of:
+
+```text
+                    ┌──────────────────────┐
+                    │    PostgreSQL 18     │
+                    │   DataWarehouse DB    │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │   PersistentVolume   │
+                    │        20 GiB         │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │  PersistentVolumeClaim│
+                    │     postgres-pvc     │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │    K3s local-path    │
+                    │       Storage        │
+                    └──────────────────────┘
+```
+
+---
+
+## Phase 5 Objectives
+
+The main objectives were:
+
+* Configure and verify persistent PostgreSQL storage.
+* Verify the PersistentVolumeClaim and PersistentVolume.
+* Establish a database recovery baseline.
+* Simulate PostgreSQL pod failure.
+* Verify automatic Kubernetes pod recovery.
+* Verify that persistent data survives pod failure.
+* Create a PostgreSQL database backup.
+* Verify backup integrity.
+* Perform a complete database restore into a separate recovery database.
+* Validate the restored warehouse.
+* Document the recovery process.
+
+---
+
+# 5.1 Persistent Storage Verification
+
+The PostgreSQL deployment uses a Kubernetes PersistentVolumeClaim named:
+
+```text
+postgres-pvc
+```
+
+The PVC is configured with:
+
+| Property      | Value           |
+| ------------- | --------------- |
+| PVC           | `postgres-pvc`  |
+| Status        | `Bound`         |
+| Capacity      | `20Gi`          |
+| Access Mode   | `RWO`           |
+| Storage Class | `local-path`    |
+| Namespace     | `datawarehouse` |
+
+The PersistentVolume associated with the claim was:
+
+```text
+pvc-bdedd752-d6cc-4ab0-8991-96edbdf10f65
+```
+
+The PV was also confirmed to be:
+
+```text
+STATUS: Bound
+```
+
+The PostgreSQL pod was running successfully on:
+
+```text
+cluster-worker2
+```
+
+This confirmed the basic storage relationship:
+
+```text
+PostgreSQL Deployment
+        ↓
+PostgreSQL Pod
+        ↓
+postgres-pvc
+        ↓
+PersistentVolume
+        ↓
+K3s local-path storage
+```
+
+---
+
+# 5.2 Database Recovery Baseline
+
+Before intentionally failing the PostgreSQL pod, the existing database state was recorded.
+
+The warehouse contained:
+
+```text
+fact_stock_prices       619,017 rows
+data_quality_errors          12 rows
+```
+
+The `fact_stock_prices` table represented the successfully validated stock-price records.
+
+The `data_quality_errors` table contained the quarantined invalid source records identified during Phase 4.
+
+This baseline was important because the same values could be checked after the failure and recovery process.
+
+### Baseline
+
+```text
+BEFORE FAILURE
+────────────────────────────
+fact_stock_prices       619,017
+data_quality_errors          12
+PostgreSQL                    Running
+PVC                           Bound
+```
+
+---
+
+# 5.3 Kubernetes Pod Failure Simulation
+
+To test persistent storage recovery, the PostgreSQL pod was intentionally deleted.
+
+The original pod was:
+
+```text
+postgres-747d4b6d84-q7r44
+```
+
+It was deleted using:
+
+```bash
+sudo kubectl delete pod -n datawarehouse postgres-747d4b6d84-q7r44
+```
+
+The pod deletion was intentional and used as a controlled failure test.
+
+Because PostgreSQL was managed by a Kubernetes Deployment, Kubernetes automatically created a replacement pod.
+
+The replacement pod became:
+
+```text
+postgres-747d4b6d84-7jbwq
+```
+
+and reached:
+
+```text
+1/1 Running
+```
+
+This demonstrated Kubernetes self-healing behavior.
+
+### Recovery flow
+
+```text
+PostgreSQL Pod
+      │
+      │ Intentional failure
+      ▼
+Pod deleted
+      │
+      ▼
+Kubernetes Deployment detects missing replica
+      │
+      ▼
+New PostgreSQL Pod created
+      │
+      ▼
+Persistent storage attached
+      │
+      ▼
+PostgreSQL becomes Ready
+```
+
+---
+
+# 5.4 Data Persistence Verification
+
+After the replacement PostgreSQL pod became ready, the warehouse was queried again.
+
+The result was:
+
+```text
+fact_stock_prices = 619,017
+```
+
+The data quality table was also checked:
+
+```text
+data_quality_errors = 12
+```
+
+The values were identical to the pre-failure baseline.
+
+### Recovery validation
+
+```text
+BEFORE FAILURE             AFTER RECOVERY
+─────────────────          ─────────────────
+619,017 fact rows    →     619,017 fact rows
+12 quality errors    →     12 quality errors
+```
+
+This proved that deleting the PostgreSQL pod did not delete the database contents.
+
+The persistence mechanism successfully allowed the replacement pod to access the existing database storage.
+
+---
+
+# 5.5 PostgreSQL Backup
+
+Pod-level persistence protects against pod failure, but a separate database backup is also required for disaster recovery.
+
+A PostgreSQL custom-format backup was created using:
+
+```bash
+pg_dump -Fc
+```
+
+The resulting backup file was:
+
+```text
+DataWarehouse_backup.dump
+```
+
+Stored on the cluster master at:
+
+```text
+~/DataWareHousing/backups/DataWarehouse_backup.dump
+```
+
+The backup size was approximately:
+
+```text
+22 MB
+```
+
+The custom PostgreSQL format was selected because it supports flexible restoration through `pg_restore`.
+
+### Backup architecture
+
+```text
+DataWarehouse
+      │
+      │ pg_dump -Fc
+      ▼
+DataWarehouse_backup.dump
+      │
+      ▼
+~/DataWareHousing/backups/
+```
+
+---
+
+# 5.6 Backup Integrity Verification
+
+The backup was copied temporarily into the PostgreSQL pod and inspected using PostgreSQL 18.6 `pg_restore`.
+
+The backup metadata confirmed:
+
+```text
+Database: DataWarehouse
+Format: CUSTOM
+Compression: gzip
+Dump Version: 1.16-0
+PostgreSQL Version: 18.6
+TOC Entries: 46
+```
+
+The backup contained the important warehouse structures.
+
+### Warehouse tables included
+
+```text
+warehouse.dim_company
+warehouse.dim_date
+warehouse.fact_stock_prices
+```
+
+The dump also contained table data for these objects.
+
+The backup contained:
+
+* Database schemas
+* Tables
+* Table data
+* Sequences
+* Primary keys
+* Foreign keys
+* Constraints
+* Stored procedure
+* Analytics views
+* Staging tables
+
+The presence of:
+
+```text
+TABLE DATA warehouse fact_stock_prices
+```
+
+confirmed that the actual warehouse records were included in the backup rather than only the table definitions.
+
+---
+
+# 5.7 Full Database Restore Test
+
+To avoid risking the original production-like `DataWarehouse` database, a separate recovery database was created:
+
+```text
+DataWarehouse_RecoveryTest
+```
+
+The backup was then restored into this database using:
+
+```bash
+pg_restore
+```
+
+This provided an isolated recovery environment.
+
+### Recovery architecture
+
+```text
+                  Original Database
+                  DataWarehouse
+                        │
+                        │ pg_dump
+                        ▼
+              DataWarehouse_backup.dump
+                        │
+                        │ pg_restore
+                        ▼
+             DataWarehouse_RecoveryTest
+```
+
+This approach allowed the restoration process to be tested without modifying or destroying the original warehouse.
+
+---
+
+# 5.8 Restored Warehouse Validation
+
+After restoration, the recovered database was validated against the original database.
+
+The important warehouse statistics were verified.
+
+| Object                        | Expected | Restored |
+| ----------------------------- | -------: | -------: |
+| `warehouse.dim_company`       |      505 |      505 |
+| `warehouse.dim_date`          |    1,259 |    1,259 |
+| `warehouse.fact_stock_prices` |  619,017 |  619,017 |
+| `staging.data_quality_errors` |       12 |       12 |
+
+The restored database therefore contained the complete warehouse dataset and supporting structures.
+
+---
+
+# 5.9 Recovery Validation Result
+
+The complete recovery process was successfully demonstrated.
+
+```text
+                 PHASE 5 RECOVERY TEST
+
+                         PostgreSQL
+                             │
+                             ▼
+                       Persistent PVC
+                             │
+                             ▼
+                      Pod failure test
+                             │
+                             ▼
+                   Kubernetes recreates pod
+                             │
+                             ▼
+                     PVC reattached
+                             │
+                             ▼
+                     Data preserved
+                             │
+                             ▼
+                    PostgreSQL backup
+                             │
+                             ▼
+                   Backup integrity check
+                             │
+                             ▼
+                     Full restore test
+                             │
+                             ▼
+                 DataWarehouse_RecoveryTest
+                             │
+                             ▼
+                    619,017 rows verified
+```
+
+---
+
+# 5.10 Recovery Test Results
+
+| Test                               | Result  |
+| ---------------------------------- | ------- |
+| PVC exists                         | PASS    |
+| PVC status `Bound`                 | PASS    |
+| PV status `Bound`                  | PASS    |
+| PostgreSQL pod running             | PASS    |
+| Controlled pod deletion            | PASS    |
+| Automatic pod recreation           | PASS    |
+| PVC persistence                    | PASS    |
+| Fact table preservation            | PASS    |
+| Data-quality records preserved     | PASS    |
+| PostgreSQL backup creation         | PASS    |
+| 22 MB backup generated             | PASS    |
+| Backup integrity verification      | PASS    |
+| Warehouse tables present in backup | PASS    |
+| Full restore                       | PASS    |
+| Restored fact rows                 | 619,017 |
+| Restored company dimension         | 505     |
+| Restored date dimension            | 1,259   |
+| Restored quality-error records     | 12      |
+
+---
+
+# 5.11 Disaster Recovery Model
+
+The project now has two complementary recovery mechanisms.
+
+### Level 1 — Kubernetes Pod Recovery
+
+Protects against:
+
+* PostgreSQL container failure
+* PostgreSQL pod deletion
+* Application/container crashes
+* Kubernetes pod recreation
+
+Architecture:
+
+```text
+Pod failure
+    ↓
+Deployment recreates pod
+    ↓
+PVC remains
+    ↓
+Database storage remains
+    ↓
+PostgreSQL starts
+    ↓
+Data available
+```
+
+### Level 2 — Database Backup Recovery
+
+Protects against larger database-level failures where the persistent database itself is no longer usable.
+
+Architecture:
+
+```text
+DataWarehouse
+    ↓
+pg_dump
+    ↓
+Backup file
+    ↓
+pg_restore
+    ↓
+Recovery database
+    ↓
+Warehouse restored
+```
+
+Using both mechanisms provides a stronger recovery architecture than relying solely on Kubernetes persistence.
+
+---
+
+# 5.12 Important Storage Consideration
+
+The K3s `local-path` storage class was used for this home-lab deployment.
+
+The PersistentVolume showed:
+
+```text
+RECLAIM POLICY: Delete
+```
+
+Therefore, the PVC/PV should **not** be casually deleted during normal failure testing.
+
+The pod failure test intentionally deleted only the PostgreSQL pod.
+
+The PVC and PV were preserved.
+
+This distinction is important:
+
+```text
+Delete Pod
+    → Kubernetes recreates pod
+    → Persistent storage survives
+
+Delete PVC/PV
+    → Storage may be deleted
+    → Database recovery depends on backup
+```
+
+Therefore, the PostgreSQL backup created during this phase provides an additional layer of protection.
+
+---
+
+# 5.13 Phase 5 Final Architecture
+
+After completing Phase 5, the PostgreSQL deployment can be represented as:
+
+```text
+                    K3s Cluster
+                        │
+                        ▼
+              ┌───────────────────┐
+              │ PostgreSQL Pod    │
+              │ PostgreSQL 18.6   │
+              └─────────┬─────────┘
+                        │
+                        ▼
+              ┌───────────────────┐
+              │   postgres-pvc    │
+              │      20 GiB       │
+              └─────────┬─────────┘
+                        │
+                        ▼
+              ┌───────────────────┐
+              │ PersistentVolume  │
+              │    local-path     │
+              └───────────────────┘
+
+                        +
+                        
+              ┌───────────────────┐
+              │ PostgreSQL Backup │
+              │       22 MB       │
+              │   Custom Format   │
+              └───────────────────┘
+```
+
+---
+
+# Phase 5 Conclusion
+
+Phase 5 successfully introduced persistence and recovery capabilities to the private-cloud data warehouse.
+
+The project demonstrated that:
+
+1. PostgreSQL is backed by persistent Kubernetes storage.
+2. The PostgreSQL pod can fail and be automatically recreated.
+3. The warehouse data survives pod deletion.
+4. The persistent volume remains available to the replacement pod.
+5. A PostgreSQL custom-format backup can be generated.
+6. The backup contains the complete warehouse structure and data.
+7. The backup can be restored into a separate PostgreSQL database.
+8. The restored warehouse contains the expected data.
+
+### Final Recovery Proof
+
+```text
+619,017 warehouse fact rows
+            ↓
+       Pod failure
+            ↓
+     Pod recreated
+            ↓
+     Data preserved
+            ↓
+      PostgreSQL backup
+            ↓
+       Backup restored
+            ↓
+619,017 rows recovered again
+```
+
+**Phase 5 — Storage & Recovery: COMPLETE ✅**
+
+The private-cloud data warehouse now has both **Kubernetes-level persistence** and **PostgreSQL-level backup/recovery capabilities**.
+
