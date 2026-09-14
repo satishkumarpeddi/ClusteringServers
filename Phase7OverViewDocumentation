@@ -1,0 +1,451 @@
+# Phase 7 — Failure Testing
+
+## Overview
+
+The objective of Phase 7 was to validate the resilience, recovery behavior, monitoring, and data integrity of the private-cloud Data Warehouse deployed on the K3s cluster.
+
+Instead of testing only the normal operating state, controlled failures were introduced to determine how Kubernetes and the monitoring stack respond to infrastructure and application failures.
+
+The tests covered:
+
+* PostgreSQL pod failure
+* Worker-node workload evacuation
+* Persistent storage limitations
+* Prometheus failure and recovery
+* PostgreSQL database integrity
+* PostgreSQL health monitoring
+
+---
+
+## 7.1 PostgreSQL Pod Failure & Recovery
+
+### Objective
+
+Verify that Kubernetes automatically recreates the PostgreSQL workload when the PostgreSQL pod is unexpectedly deleted.
+
+### Test
+
+The PostgreSQL pod was intentionally deleted:
+
+```bash
+sudo kubectl delete pod -n datawarehouse -l app=postgres
+```
+
+The replacement pod was monitored using:
+
+```bash
+sudo kubectl get pods -n datawarehouse -w
+```
+
+### Result
+
+The original PostgreSQL pod was terminated and Kubernetes automatically created a replacement pod.
+
+The replacement PostgreSQL pod successfully reached:
+
+```text
+1/1 Running
+```
+
+PostgreSQL connectivity was subsequently verified using:
+
+```bash
+pg_isready
+```
+
+### Result
+
+**PASS — Kubernetes automatically recovered the PostgreSQL pod.**
+
+---
+
+## 7.2 Worker Node Drain & Rescheduling
+
+### Objective
+
+Simulate a worker-node maintenance/failure scenario and determine whether workloads can be moved to other available K3s nodes.
+
+The test was performed on:
+
+```text
+cluster-worker2
+IP: 192.168.1.3
+```
+
+### Step 1 — Cordon Node
+
+```bash
+sudo kubectl cordon cluster-worker2
+```
+
+Result:
+
+```text
+node/cluster-worker2 cordoned
+```
+
+The node stopped accepting new workloads.
+
+### Step 2 — Drain Node
+
+```bash
+sudo kubectl drain cluster-worker2 \
+  --ignore-daemonsets \
+  --delete-emptydir-data
+```
+
+The PostgreSQL pod was successfully evicted:
+
+```text
+pod/postgres-84cf85cc6b-llglq evicted
+node/cluster-worker2 drained
+```
+
+### Step 3 — Recovery Attempt
+
+Kubernetes created a replacement PostgreSQL pod:
+
+```text
+postgres-84cf85cc6b-6tqrt
+```
+
+However, the replacement pod remained:
+
+```text
+Pending
+```
+
+### Root Cause
+
+The PostgreSQL PersistentVolume uses K3s `local-path` storage.
+
+The scheduler reported:
+
+```text
+0/4 nodes are available:
+1 node(s) were unschedulable,
+3 node(s) didn't match PersistentVolume's node affinity
+```
+
+The PersistentVolume was therefore tied to the node where its local storage existed.
+
+### Engineering Finding
+
+Kubernetes successfully recreated the application workload, but the node-local persistent volume prevented PostgreSQL from being scheduled on another node.
+
+This demonstrates an important difference between:
+
+**Application High Availability**
+
+and
+
+**Storage High Availability**
+
+The current architecture provides application-level recovery but does not provide cross-node database storage failover.
+
+### Recovery
+
+The worker was returned to service:
+
+```bash
+sudo kubectl uncordon cluster-worker2
+```
+
+PostgreSQL was subsequently restored to a healthy running state.
+
+### Result
+
+**PARTIAL PASS — Kubernetes workload recovery succeeded, but node-local storage prevented cross-node PostgreSQL failover.**
+
+---
+
+## 7.3 Prometheus Failure & Recovery
+
+### Objective
+
+Verify that the monitoring infrastructure itself can recover from a component failure.
+
+The Prometheus pod was intentionally deleted:
+
+```bash
+sudo kubectl delete pod -n monitoring -l app=prometheus
+```
+
+### Recovery
+
+Kubernetes immediately created a replacement Prometheus pod.
+
+The replacement pod reached:
+
+```text
+1/1 Running
+```
+
+The new pod successfully initialized Prometheus.
+
+Prometheus logs confirmed:
+
+```text
+Starting Prometheus Server
+TSDB started
+Completed loading of configuration file
+Server is ready to receive web requests.
+```
+
+The replacement pod was:
+
+```text
+prometheus-545899ff95-5gv7g   1/1   Running
+```
+
+### Result
+
+**PASS — Prometheus automatically recovered through Kubernetes deployment management.**
+
+---
+
+## 7.4 Database Integrity After Failure
+
+### Objective
+
+Verify that the worker failure and PostgreSQL pod recovery did not corrupt or alter the Data Warehouse.
+
+The primary fact table was checked after recovery:
+
+```sql
+SELECT COUNT(*) AS total_fact_stock_prices
+FROM warehouse.fact_stock_prices;
+```
+
+### Result
+
+```text
+total_fact_stock_prices
+-----------------------
+619017
+```
+
+Expected baseline:
+
+```text
+619017
+```
+
+Actual:
+
+```text
+619017
+```
+
+### Result
+
+**PASS — Data integrity was preserved.**
+
+The Data Warehouse retained all **619,017 fact records** after the failure-testing process.
+
+---
+
+## 7.5 PostgreSQL Monitoring Validation
+
+### Objective
+
+Verify that the PostgreSQL exporter correctly reports database availability.
+
+The PostgreSQL exporter was queried directly:
+
+```bash
+sudo kubectl exec -n datawarehouse deploy/postgres-exporter -- \
+wget -qO- http://localhost:9187/metrics | grep '^pg_up'
+```
+
+Result:
+
+```text
+pg_up 1
+```
+
+The Prometheus metric:
+
+```promql
+pg_up{job="postgres"}
+```
+
+therefore indicates that PostgreSQL is healthy.
+
+### Result
+
+**PASS — PostgreSQL health monitoring is functioning correctly.**
+
+---
+
+# Failure Testing Summary
+
+| Test                         | Expected Behavior              | Result     |
+| ---------------------------- | ------------------------------ | ---------- |
+| PostgreSQL pod deletion      | Kubernetes recreates pod       | ✅ PASS     |
+| Worker node drain            | Workloads evacuated            | ✅ PASS     |
+| PostgreSQL rescheduling      | Database moves to another node | ⚠️ LIMITED |
+| Prometheus deletion          | Monitoring pod recreated       | ✅ PASS     |
+| Database integrity           | No data loss/corruption        | ✅ PASS     |
+| PostgreSQL health monitoring | `pg_up = 1`                    | ✅ PASS     |
+
+---
+
+# Key Engineering Findings
+
+## 1. Kubernetes Self-Healing
+
+Kubernetes successfully recreated failed workloads without manual pod creation.
+
+This validates the use of Deployments and Kubernetes reconciliation for application recovery.
+
+---
+
+## 2. Local Storage Is the Current HA Limitation
+
+The most important finding from Phase 7 was the limitation of K3s `local-path` storage.
+
+The PostgreSQL workload could be recreated, but its PersistentVolume could not move freely between worker nodes.
+
+Therefore:
+
+```text
+Pod HA ≠ Storage HA
+```
+
+For true PostgreSQL high availability, the next architecture could use:
+
+* Network-attached storage
+* Distributed storage
+* Longhorn
+* NFS
+* Ceph
+* PostgreSQL replication
+* Cloud-native database operators
+
+The current project intentionally retains `local-path` storage because it is lightweight and suitable for the resource-constrained home lab.
+
+---
+
+## 3. Monitoring Components Are Recoverable
+
+Prometheus was intentionally deleted and Kubernetes recreated it automatically.
+
+This demonstrates that the monitoring infrastructure itself benefits from Kubernetes orchestration.
+
+---
+
+## 4. Data Integrity Was Preserved
+
+Despite controlled failures, the Data Warehouse maintained:
+
+```text
+619,017 fact records
+```
+
+No loss of warehouse records was observed.
+
+---
+
+# Phase 7 Architecture Validation
+
+The failure tests validated the following chain:
+
+```text
+              Failure
+                 │
+                 ▼
+        Kubernetes detects
+             failure
+                 │
+                 ▼
+       ┌─────────────────┐
+       │ Reconciliation  │
+       │    Controller   │
+       └────────┬────────┘
+                │
+                ▼
+       Replacement Pod
+                │
+                ▼
+       Application Recovery
+```
+
+For PostgreSQL:
+
+```text
+PostgreSQL Pod Failure
+        │
+        ▼
+Pod recreated
+        │
+        ▼
+PersistentVolume checked
+        │
+        ▼
+local-path node affinity
+        │
+        ▼
+Cross-node scheduling blocked
+```
+
+This exposed the storage dependency of the current architecture.
+
+---
+
+# Phase 7 Final Result
+
+Phase 7 successfully validated the resilience of the private-cloud Data Warehouse infrastructure.
+
+The tests demonstrated:
+
+* Kubernetes self-healing
+* Pod recovery
+* Worker node maintenance behavior
+* Monitoring recovery
+* Database integrity
+* PostgreSQL health monitoring
+* Persistent storage limitations
+* Real-world failure behavior
+
+### Phase 7 Status
+
+**COMPLETE ✅**
+
+### Overall Finding
+
+The private cloud successfully handles application and monitoring failures through Kubernetes reconciliation.
+
+However, PostgreSQL currently depends on node-local persistent storage, meaning database failover across worker nodes is not yet fully highly available.
+
+This limitation has been identified and documented as a future architectural improvement.
+
+---
+
+## Next Phase
+
+**Phase 8 — CI/CD + Power BI**
+
+The next phase will connect the infrastructure to an automated development and analytics workflow:
+
+```text
+GitHub
+   │
+   ▼
+CI/CD
+   │
+   ▼
+Container Build
+   │
+   ▼
+K3s Deployment
+   │
+   ▼
+PostgreSQL Data Warehouse
+   │
+   ▼
+Power BI Analytics
+```
+
+This will complete the end-to-end private-cloud Data Warehouse platform.
+
