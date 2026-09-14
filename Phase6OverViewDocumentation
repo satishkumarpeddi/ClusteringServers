@@ -67,3 +67,226 @@ Example:
 ```bash
 kubectl top nodes
 kubectl top pods -A
+
+The cluster contains:
+cluster-master
+cluster-worker1
+cluster-worker2
+server4
+
+All nodes were verified as Ready.
+
+2. Prometheus
+
+Prometheus collects time-series metrics from the infrastructure and
+PostgreSQL exporter.
+
+Configuration:
+
+Scrape interval: 15 seconds
+Retention: 3 days
+Deployment replicas: 1
+
+Prometheus monitors:
+
+Node CPU
+Node memory
+Node filesystem
+Network traffic
+PostgreSQL health
+PostgreSQL database statistics
+3. Node Exporter
+
+Node Exporter runs as a DaemonSet.
+
+One exporter runs on each K3s node.
+
+Metrics include:
+
+CPU utilization
+Memory utilization
+Available memory
+Filesystem usage
+Network receive traffic
+Network transmit traffic
+4. PostgreSQL Exporter
+
+PostgreSQL Exporter provides database-level metrics.
+
+Database:
+
+DataWarehouse
+
+The exporter exposes metrics on port:
+
+9187
+
+Database availability is monitored using:
+
+pg_up
+
+Expected healthy value:
+
+pg_up = 1
+5. Grafana
+
+Grafana provides the monitoring dashboard.
+
+Dashboard:
+
+K3s Private Cloud Monitoring
+
+The dashboard contains:
+
+CPU utilization
+Memory utilization
+Available memory
+Disk utilization
+Network RX
+Network TX
+PostgreSQL status
+PostgreSQL active connections
+PostgreSQL tuples fetched
+PostgreSQL tuples inserted
+6. Logging
+
+Centralized logging is implemented using:
+
+Grafana Alloy
+Loki
+Grafana Explore
+
+Alloy runs as a DaemonSet on the K3s nodes and collects Kubernetes container
+logs.
+
+Logs are forwarded to Loki.
+
+Example LogQL queries:
+
+{namespace="datawarehouse"}
+
+PostgreSQL logs:
+
+{namespace="datawarehouse", container="postgres"}
+
+Kubernetes system logs:
+
+{namespace="kube-system"}
+7. Alerting
+
+Grafana Alerting is configured with the evaluation group:
+
+K3s Infrastructure Alerts
+
+Node CPU High
+
+Threshold:
+
+> 80%
+
+Duration:
+
+5 minutes
+
+Severity:
+
+warning
+
+Node Memory High
+
+Threshold:
+
+> 85%
+
+Duration:
+
+5 minutes
+
+Severity:
+
+warning
+
+PostgreSQL Down
+
+Condition:
+
+pg_up < 1
+
+Duration:
+
+2 minutes
+
+Severity:
+
+critical
+
+8. Resource-Conscious Design
+
+The monitoring stack was designed for a resource-constrained private cloud.
+
+Resource limits were applied to monitoring components to prevent observability
+services from consuming excessive cluster resources.
+
+Prometheus and Grafana were configured with lightweight resource limits and
+short metric retention.
+
+Loki uses 24-hour log retention for the initial deployment.
+
+9. Monitoring Validation
+
+The following checks were successfully performed:
+
+kubectl get nodes
+kubectl top nodes
+kubectl top pods -A
+kubectl get pods -n monitoring
+kubectl get pods -n logging
+kubectl get pods -n datawarehouse
+
+PostgreSQL health:
+
+kubectl exec -n datawarehouse deploy/postgres -- \
+pg_isready -U postgres -d DataWarehouse
+
+Expected:
+
+accepting connections
+
+PostgreSQL exporter:
+
+kubectl exec -n datawarehouse deploy/postgres-exporter -- \
+wget -qO- http://localhost:9187/metrics | grep '^pg_up'
+
+Expected:
+
+pg_up 1
+10. Phase 6 Result
+
+Monitoring and logging infrastructure has been successfully deployed.
+
+The private cloud now provides:
+
+Infrastructure monitoring
+Kubernetes resource monitoring
+PostgreSQL monitoring
+Centralized container logging
+Grafana dashboards
+Prometheus metrics
+Alerting
+Node-level observability
+Database-level observability
+
+Phase 6 — Monitoring & Logging: COMPLETE
+
+
+Save:
+
+**Ctrl+O → Enter → Ctrl+X**
+
+Then verify:
+
+```bash
+cat ~/DataWareHousing/docs/monitoring/monitoring-logging.md | head -20
+After this
+
+Once the file is saved, Phase 6 is officially COMPLETE.
