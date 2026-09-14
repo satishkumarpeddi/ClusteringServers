@@ -1,0 +1,1455 @@
+🚀 Phase 6 — Monitoring & Logging:-
+=================================
+
+Phase6 Roadmap:- 
+==============
+
+6.1 Cluster health baseline
+        ↓
+6.2 Resource monitoring
+        ↓
+6.3 PostgreSQL health monitoring
+        ↓
+6.4 Centralized/application logs
+        ↓
+6.5 Monitoring dashboard
+        ↓
+6.6 Alerts & thresholds
+        ↓
+6.7 Document Phase 6
+
+
+STEP 6.1 — Cluster Health Baseline:-
+==================================
+
+commands:-
+"""
+	sudo kubectl get nodes -o wide 
+	sudo kubectl get pods -A -o wide 
+	sudo kubectl get deployment -A
+	sudo kubectl get svc -A
+	sudo kubectl top nodes
+"""
+
+STEP 6.2 — Pod-Level Resource Monitoring:-
+========================================
+
+commands:-
+
+"""
+	sudo kubectl top pods -A
+	sudo kubectl top pods -n datawarehouse 
+	sudo kubectl get deployment postgres -n datawarehouse -o yaml
+"""
+
+STEP 6.2.1 — Add Resource Requests & Limits:-
+===========================================
+
+commands:-
+
+"""
+	sudo kubectl set resource deployment postgres -n datawarehoues \
+	--requests=cpu=250m,memory=256Mi \
+	--limits=cpu=1000m,memory=1Gi
+        
+
+	sudo kubectl rollout status deployment/postgres -n datawarehouse
+	
+	sudo kubectl get deployment postgres -n datawarehouse
+
+	sudo kubectl top pods -n datawarehouse
+
+Verification after 'Roll-Out':-
+=============================
+
+sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+psql -U postgres -d DataWarehouse -c \
+"SELECT COUNT(*) AS fact_rows FROM warehouse.fact_stock_prices;"
+
+
+"""
+
+STEP 6.3 — PostgreSQL Health Monitoring:-
+=======================================
+
+Three Levels:-
+============
+
+"""
+Kubernetes
+   ↓
+Pod health
+   ↓
+PostgreSQL process
+   ↓
+Database query
+"""
+
+6.3.1 — Check PostgreSQL pod health:-
+===================================
+
+commands:-
+
+"""
+	sudo kubectl get pod -n datawarehouse -o wide 
+	sudo kubectl describe pod -n datawarehouse -l app=postgres | tail -40
+"""
+
+6.3.2 — Check PostgreSQL server:-
+===============================
+
+command:-
+
+"""
+	sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+	pg_isready -U postgres -d DataWarehouse 
+"""
+
+6.3.3 — Check the database:-
+==========================
+
+"""
+	sudo kubectl exec -it -n datawarehouse deploy/postgres -- \
+	psql -U postgres -d DataWarehouse -c \
+	"select current_database(),version();"
+"""
+
+Monitor Layer's:-
+===============
+
+"""
+┌───────────────────────────────┐
+│ K3s Node Monitoring           │
+│ CPU / Memory                  │
+└───────────────┬───────────────┘
+                ↓
+┌───────────────────────────────┐
+│ Pod Monitoring                │
+│ Ready / Restarts / Resources  │
+└───────────────┬───────────────┘
+                ↓
+┌───────────────────────────────┐
+│ PostgreSQL Health             │
+│ pg_isready                    │
+└───────────────┬───────────────┘
+                ↓
+┌───────────────────────────────┐
+│ Database Health               │
+│ SQL connectivity / queries    │
+└───────────────────────────────┘
+"""
+
+STEP 6.4 — Build the Monitoring Dashboard:-
+=========================================
+
+Architecture:-
+=============
+
+"""
+              K3s Cluster
+                   │
+       ┌───────────┼───────────┐
+       ↓           ↓           ↓
+     Nodes        Pods      PostgreSQL
+       │           │           │
+       └───────────┼───────────┘
+                   ↓
+              Prometheus
+                   ↓
+                Grafana
+                   ↓
+             Monitoring UI
+
+"""
+
+commands:-
+
+"""
+	sudo kubectl top nodes
+	free -h
+
+"""
+
+Step 6.4.1 — Create monitoring namespace:-
+========================================
+
+commands:-
+
+"""
+	sudo kubectl create namespace monitoring 
+	
+	sudo kubectl get namespaces
+"""
+
+
+Step 6.4.2 — Deploy lightweight Prometheus:-
+==========================================
+
+"""	
+sudo tee prometheus-config.yaml > /dev/null <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets:
+              - localhost:9090
+EOF
+
+sudo kubectl apply -f prometheus-config.yaml
+"""
+
+Step 6.4.3 — Deploy Prometheus:-
+==============================
+
+"""
+	sudo tee prometheus.yaml > /dev/null <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.5.0
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=3d"
+          ports:
+            - containerPort: 9090
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+EOF
+
+sudo kubectl apply -f prometheus.yaml
+
+sudo kubectl get pods -n monitoring -o wide
+
+sudo kubectl get svc -n monitoring
+"""
+
+
+Step 6.4.4 — Wait and verify:-
+============================
+
+"""
+	sudo kubectl get pods -n monitorning -o wide 
+
+	sudo kubectl logs -n monitoring deployment/prometheus --tail=30
+
+	sudo kubectl describe pod -n monitoring prometheus-7788b56b85-jt9jb
+"""
+
+Step 6.4.5 — Access Prometheus Dashboard:-
+========================================
+
+command's:-
+=========
+
+"""
+	sudo kubectl port-forward -n monitoring svc/prometheus 9090:9090
+	
+	http://localhost:9090 --> It give's GUI for 'Prometheus'
+"""
+
+Step 6.4.6 — Deploy Grafana:-
+===========================
+
+"""
+
+sudo tee grafana.yaml > /dev/null <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:12.1.1
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+EOF
+
+"""
+
+command's:-
+
+"""
+	sudo kubectl apply -f grafana.yaml
+
+	sudo kubectl get pods -n monitoring -o wide
+
+	sudo kubectl get svc -n monitoring --> `Monitoring Service's`
+	
+	sudo kubectl logs -n monitoring deploy/grafana --tail=30
+	
+	sudo kubectl describe pod -n monitoring grafana-95c98765d-p4rld
+"""
+
+Current Monitoring Stack:-
+========================
+
+"""
+	        K3s Cluster
+                     │
+              ┌──────┴──────┐
+              │             │
+         Prometheus       Grafana
+          :9090             :3000
+              │             │
+        Metrics data     Visualization
+"""
+
+Step 6.4.7 — Open Grafana:-
+=========================
+
+commands:-
+=========
+
+"""
+	sudo kubectl port-forward -n monitoring svc/grafana 3000:3000
+
+"""
+
+
+Step 6.4.8 — Connect Grafana to Prometheus:-
+==========================================
+
+
+Now we'll make Grafana use Prometheus as its metrics source.
+
+In Grafana:
+
+Open Connections
+Select Data sources
+Click Add data source
+Select Prometheus
+For Prometheus server URL, enter:
+http://prometheus.monitoring.svc.cluster.local:9090
+Scroll down and click Save & test
+
+You should get:
+
+Data source is working
+
+Step 6.4.9 — Verify Grafana can read metrics:-
+============================================
+
+In Grafana:
+
+Go to Explore
+Select the Prometheus data source.
+In the query box, enter:
+up
+Click Run query.
+
+You should get something like:
+
+up{instance="localhost:9090",job="prometheus"} 1
+
+1 means Prometheus is UP and Grafana can read its metrics.
+
+Next
+
+Right now we're only collecting Prometheus's own metrics. After confirming up = 1, we'll add:
+
+🖥️ CPU usage for all 4 nodes
+🧠 RAM usage
+💾 Disk usage
+📦 Kubernetes pod metrics
+🟢 Node health
+🐘 PostgreSQL monitoring
+🚨 Alerts
+
+Step 6.4.10 — Install Node Exporter:-
+===================================
+
+"""
+	sudo tee node-exporter.yaml > /dev/null <<'EOF'
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: node-exporter
+          image: prom/node-exporter:v1.9.1
+          args:
+            - --path.rootfs=/host
+          ports:
+            - containerPort: 9100
+              hostPort: 9100
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: root
+              mountPath: /host
+              readOnly: true
+      volumes:
+        - name: root
+          hostPath:
+            path: /
+EOF
+
+	sudo kubectl apply -f node-exporter.yaml
+
+	sudo kubectl get pods -n monitoring -o wide
+
+	sudo kubectl get pods -n monitoring -l app=node-exporter -o wide 
+
+"""
+
+Step 6.4.11 — Connect Node Exporter to Prometheus:-
+=================================================
+
+"""
+	sudo tee prometheus-config.yaml > /dev/null <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets:
+              - localhost:9090
+
+      - job_name: node-exporter
+        static_configs:
+          - targets:
+              - 192.168.1.7:9100
+            labels:
+              node: cluster-master
+
+          - targets:
+              - 192.168.1.2:9100
+            labels:
+              node: cluster-worker1
+
+          - targets:
+              - 192.168.1.3:9100
+            labels:
+              node: cluster-worker2
+
+          - targets:
+              - 192.168.1.8:9100
+            labels:
+              node: server4
+EOF
+
+sudo kubectl apply -f prometheus-config.yaml
+
+sudo kubectl rollout restart deployment/prometheus -n monitoring
+
+sudo kubectl get pods -n monitoring
+
+"""
+
+Step 6.4.12 — Verify Node Exporter targets:-
+==========================================
+
+"""
+	http://localhost:9090
+	
+	100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))*100)
+
+"""
+
+Step 6.4.13 — Build the Grafana K3s Dashboard:-
+=============================================
+
+
+Go back to:
+
+http://localhost:3000
+
+In Grafana:
+
+Click Dashboards
+Click New
+Select New dashboard
+Click Add visualization
+Select your Prometheus data source.
+First panel — CPU Usage
+
+In the query editor, enter:
+
+100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+Set:
+
+Visualization: Time series
+Title: Node CPU Usage
+Unit: Percent (0-100)
+
+
+Step 6.4.14 — Disk Usage Panel:-
+==============================
+
+In your K3s Private Cloud Monitoring dashboard:
+
+Add visualization → Prometheus
+
+Use:
+"""
+100 * (
+  1 -
+  (
+    node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint="/"}
+    /
+    node_filesystem_size_bytes{fstype!~"tmpfs|overlay",mountpoint="/"}
+  )
+)
+"""
+Set:
+
+Visualization: Time series
+Title: Root Disk Usage
+Unit: Percent (0-100)
+
+Step 6.4.15 — Network Receive Traffic:-
+=====================================
+
+Add another visualization.
+
+Query:
+
+sum by (instance) (
+  rate(node_network_receive_bytes_total{device!~"lo"}[5m])
+) / 1024 / 1024
+
+Set:
+
+Visualization: Time series
+Title: Network Receive
+Unit: MB/s
+
+Step 6.4.16 — Network Transmit Traffic:-
+======================================
+
+Add another visualization:
+
+sum by (instance) (
+  rate(node_network_transmit_bytes_total{device!~"lo"}[5m])
+) / 1024 / 1024
+
+Set:
+
+Visualization: Time series
+Title: Network Transmit
+Unit: MB/s
+
+DashBoard For Visualiaztion Of Monitoring:- 
+=========================================
+
+"""
+┌──────────────────────────────────────┐
+│       K3s Private Cloud Monitoring   │
+├──────────────────────────────────────┤
+│ CPU Usage          │ Memory Usage    │
+├────────────────────┼─────────────────┤
+│ Available Memory   │ Disk Usage      │
+├────────────────────┼─────────────────┤
+│ Network Receive    │ Network Transmit│
+└────────────────────┴─────────────────┘
+"""
+
+Step 6.4.17 — PostgreSQL Monitoring:-
+===================================
+
+"""
+PostgreSQL
+    ↓
+postgres_exporter
+    ↓
+Prometheus
+    ↓
+Grafana
+"""
+
+
+commands:-
+========
+
+"""
+sudo kubectl create secret generic postgres-exporter-secret \
+-n datawarehouse \
+--from-literal=DATA_SOURCE_NAME='postgresql://postgres:postgres@postgres.datawarehouse.svc.cluster.local:5432/DataWarehouse?sslmode=disable'
+
+sudo kubectl get secret -n datawarehouse postgres-exporter-secret
+
+"""
+
+Step 6.4.18 — Deploy PostgreSQL Exporter:-
+========================================
+
+"""
+sudo tee postgres-exporter.yaml > /dev/null <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: datawarehouse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+    spec:
+      containers:
+        - name: postgres-exporter
+          image: prometheuscommunity/postgres-exporter:v0.17.1
+          env:
+            - name: DATA_SOURCE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-secret
+                  key: DATA_SOURCE_NAME
+          ports:
+            - containerPort: 9187
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  namespace: datawarehouse
+spec:
+  selector:
+    app: postgres-exporter
+  ports:
+    - port: 9187
+      targetPort: 9187
+EOF
+
+
+commands:-
+========
+
+sudo kubectl apply -f postgres-exporter.yaml
+
+sudo kubectl get pods -n datawarehouse -o wide
+
+sudo kubectl logs -n datawarehouse deployment/postgres-exporter --tail=30
+"""
+
+Step 6.4.19 — Verify PostgreSQL exporter metrics:-
+================================================
+
+commands:-
+========
+
+"""
+	sudo kubectl exec -n datawarehouse deploy/postgres-exporter -- \
+wget -qO- http://localhost:9187/metrics | head -30
+"""
+
+Step 6.4.20 — Verify pg_up:-
+==========================
+
+"""
+sudo kubectl exec -n datawarehouse deploy/postgres-exporter -- \
+wget -qO- http://localhost:9187/metrics | grep '^pg_up'
+"""
+
+Phase 6.4 — Next: Add PostgreSQL exporter to Prometheus:-
+=======================================================
+
+
+On cluster-master, run:
+
+"" sudo vim ~/prometheus-config.yaml ""
+
+"""
+	apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+
+    scrape_configs:
+
+      # Prometheus itself
+      - job_name: prometheus
+        static_configs:
+          - targets:
+              - localhost:9090
+
+      # K3s cluster nodes
+      - job_name: node-exporter
+        static_configs:
+
+          - targets:
+              - 192.168.1.7:9100
+            labels:
+              node: cluster-master
+
+          - targets:
+              - 192.168.1.2:9100
+            labels:
+              node: cluster-worker1
+
+          - targets:
+              - 192.168.1.3:9100
+            labels:
+              node: cluster-worker2
+
+          - targets:
+              - 192.168.1.8:9100
+            labels:
+              node: server4
+
+      # PostgreSQL exporter
+      - job_name: postgres
+        static_configs:
+          - targets:
+              - postgres-exporter.datawarehouse.svc.cluster.local:9187
+            labels:
+              database: DataWarehouse
+"""
+
+Save and exit.
+
+Then apply the updated configuration:
+
+"" sudo kubectl apply -f ~/prometheus-config.yaml ""
+
+Restart Prometheus:
+
+"" sudo kubectl rollout restart deployment/prometheus -n monitoring ""
+
+Wait a few seconds, then check:
+
+"" sudo kubectl get pods -n monitoring ""
+
+-----------------------------------------------------------------------------------------
+
+Next — Add PostgreSQL panels to Grafana
+
+Since pg_up 1 is confirmed, let's connect the PostgreSQL metrics to your K3s Private Cloud Monitoring dashboard.
+
+Open Grafana:
+
+http://localhost:3000
+
+Go to:
+
+Dashboards → K3s Private Cloud Monitoring → Edit
+
+Click Add → Visualization.
+
+Panel 1 — PostgreSQL Status:-
+===========================
+
+Use this query:
+
+pg_up
+
+Set visualization to Stat.
+
+Title:
+
+PostgreSQL Status
+
+Value mappings:
+
+1 → UP
+0 → DOWN
+
+Panel 2 — Active Connections:-
+============================
+Add another visualization:
+
+pg_stat_database_numbackends{datname="DataWarehouse"}
+
+Title:
+
+PostgreSQL Active Connections
+
+Visualization:
+
+Stat
+
+Panel 3 — Database Tuples Fetched:-
+=================================
+Query:
+
+pg_stat_database_tup_fetched{datname="DataWarehouse"}
+
+Title:
+
+PostgreSQL Tuples Fetched
+
+Visualization:
+
+Time series
+
+Panel 4 — Database Inserts:-
+==========================
+Query:
+
+pg_stat_database_tup_inserted{datname="DataWarehouse"}
+
+Title:
+
+PostgreSQL Tuples Inserted
+
+Visualization:
+
+Time series
+
+Save the dashboard.
+
+Structure Design Of Monitoring:- 
+==============================
+
+"""
+	       K3s Private Cloud
+                        │
+        ┌───────────────┼───────────────┐
+        │               │               │
+   Node Exporter    PostgreSQL      Metrics Server
+    4 Nodes          Exporter
+        │               │
+        └───────┬───────┘
+                │
+            Prometheus
+                │
+             Grafana
+                │
+       K3s Monitoring Dashboard
+"""
+
+Phase 6.5 — Logging:-
+===================
+
+"""
+K3s Nodes
+   │
+   └── Alloy
+        │
+        ▼
+      Loki
+        │
+        ▼
+     Grafana
+"""
+
+commands:-
+========
+
+"""
+	sudo kubectl create namespace logging
+	
+	sudo kubectl get namespaces --> To get all the namespaces created
+
+	sudo kubectl get namespaces | grep logging 
+"""	
+
+
+Phase 6.5 — Step 2: Deploy Loki:-
+===============================
+
+"""
+	apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: logging
+data:
+  loki.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+
+    common:
+      path_prefix: /loki
+      replication_factor: 1
+
+      ring:
+        kvstore:
+          store: inmemory
+
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+
+    limits_config:
+      retention_period: 24h
+
+    compactor:
+      working_directory: /loki/compactor
+      retention_enabled: true
+      delete_request_store: filesystem
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      containers:
+        - name: loki
+          image: grafana/loki:3.5.0
+          args:
+            - "-config.file=/etc/loki/loki.yaml"
+
+          ports:
+            - containerPort: 3100
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+
+            - name: storage
+              mountPath: /loki
+
+      volumes:
+        - name: config
+          configMap:
+            name: loki-config
+
+        - name: storage
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  selector:
+    app: loki
+  ports:
+    - port: 3100
+      targetPort: 3100
+"""
+
+commands:-
+========
+
+"""
+	sudo kubectl apply -f ~/loki.yaml
+
+	sudo kubectl get pods -n logging
+""" 
+
+
+Phase 6.5 — Step 3: Connect Loki to Grafana:-
+===========================================
+
+commands:-
+========
+
+"""
+	sudo kubectl exec -n logging deploy/loki -- \
+	wget -q0- https://localhost:3100/ready
+"""
+
+
+Phase 6.5 — Step 3: Add Loki to Grafana:-
+=======================================
+
+Open Grafana:
+
+http://localhost:3000
+
+Go to:
+
+Connections → Data sources → Add new data source
+
+Select:
+
+Loki
+
+Set:
+
+Name
+
+Loki
+
+URL
+
+http://loki.logging.svc.cluster.local:3100
+
+Leave authentication disabled.
+
+Click:
+
+Save & test
+
+You should get a successful connection message.
+
+Then verify
+
+Go to:
+
+Explore → Data source: Loki
+
+Run:
+
+{namespace="datawarehouse"}
+
+At this point you may get no logs, because we haven't deployed the log collector yet.
+
+
+Phase 6.5 — Step 4: Deploy Grafana Alloy:-
+========================================
+
+sudo vim ~/alloy.yaml
+
+"""
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: logging
+data:
+  config.alloy: |
+    logging {
+      level = "info"
+    }
+
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+
+    discovery.relabel "pods" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_node_name"]
+        target_label  = "node"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+        separator     = "/"
+        target_label  = "__path__"
+        replacement   = "/var/log/pods/*$1/*.log"
+      }
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.relabel.pods.output
+      forward_to = [loki.write.default.receiver]
+    }
+
+    loki.write "default" {
+      endpoint {
+        url = "http://loki.logging.svc.cluster.local:3100/loki/api/v1/push"
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  namespace: logging
+spec:
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
+    spec:
+      serviceAccountName: alloy
+
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.10.2
+
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy/data
+
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+
+            - name: pods
+              mountPath: /var/log/pods
+              readOnly: true
+
+            - name: containers
+              mountPath: /var/log/containers
+              readOnly: true
+
+            - name: alloy-data
+              mountPath: /var/lib/alloy/data
+
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+
+        - name: pods
+          hostPath:
+            path: /var/log/pods
+
+        - name: containers
+          hostPath:
+            path: /var/log/containers
+
+        - name: alloy-data
+          hostPath:
+            path: /var/lib/alloy
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: logging
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: logging
+"""
+
+
+commands:-
+
+"""
+	sudo kubectl apply -f ~/alloy.yaml
+	sudo kubectl get pods -n logging -o wide
+"""
+Phase 6.5 - Step 5 — Verify logs are reaching Loki
+==================================================
+
+
+Open Grafana:
+
+http://localhost:3000
+
+Go to:
+
+Explore → Data source: Loki
+
+Run this LogQL query:
+
+{namespace="datawarehouse"}
+
+You should start seeing logs from your datawarehouse namespace.
+
+If you get logs, try:
+
+{namespace="datawarehouse", container="postgres"}
+
+This should show PostgreSQL container logs.
+
+
+Also test K3s system logs
+
+{namespace="kube-system"}
+
+
+Phase 6.6 — Alerts & Thresholds:-
+===============================
+
+Now we'll add a few useful alerts, without creating too many rules or putting unnecessary load on your small cluster.
+
+We'll start with the most important one: node CPU > 80%.
+
+In Grafana:
+
+Alerting → Alert rules → New alert rule
+
+Set the query:
+
+"""
+100 - (
+  avg by (instance) (
+    rate(node_cpu_seconds_total{mode="idle"}[5m])
+  ) * 100
+)
+"""
+
+Set the condition:
+
+WHEN query A
+IS ABOVE
+80
+
+Configure:
+
+Evaluate every: 1m
+For: 5m
+Alert name: K3s Node CPU High
+
+This means the alert fires only if a node stays above 80% CPU for 5 continuous minutes, avoiding noisy alerts from short spikes.
+
+Add a second alert — Memory
+
+Query:
+
+100 * (
+  1 -
+  (
+    node_memory_MemAvailable_bytes
+    /
+    node_memory_MemTotal_bytes
+  )
+)
+
+Condition:
+
+IS ABOVE 85
+
+Name:
+
+K3s Node Memory High
+
+Use the same:
+
+Evaluate every: 1m
+For: 5m
+Third alert — PostgreSQL Down
+
+Query:
+
+pg_up{job="postgres"}
+
+Condition:
+
+IS BELOW 1
+
+Name:
+
+PostgreSQL Down
+
+For:
+
+2m
+
+
+Final Organization Of Alter:-
+===========================
+
+"""
+Alerting
+└── K3s Private Cloud
+    ├── K3s Node CPU High
+    │   ├── severity: warning
+    │   ├── component: k3s-node
+    │   └── environment: private-cloud
+    │
+    ├── K3s Node Memory High
+    │   ├── severity: warning
+    │   ├── component: k3s-node
+    │   └── environment: private-cloud
+    │
+    └── PostgreSQL Down
+        ├── severity: critical
+        ├── component: postgresql
+        └── environment: private-cloud
+"""

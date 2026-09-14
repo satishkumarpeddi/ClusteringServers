@@ -1,0 +1,69 @@
+# Phase 6 — Monitoring & Logging
+
+## Overview
+
+The Data Warehouse private cloud is monitored using a lightweight observability
+stack deployed on the K3s cluster.
+
+The monitoring architecture consists of:
+
+- Prometheus
+- Grafana
+- Node Exporter
+- PostgreSQL Exporter
+- Loki
+- Grafana Alloy
+- Grafana Alerting
+- Kubernetes Metrics Server
+
+## Architecture
+
+                    ┌──────────────────────┐
+                    │      K3s Cluster     │
+                    │                      │
+                    │ Master + 3 Workers   │
+                    └──────────┬───────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+        Node Exporter    PostgreSQL       Kubernetes
+        (All Nodes)       Exporter        Metrics
+              │                │                │
+              └────────────┬───┴────────────────┘
+                           ▼
+                     ┌────────────┐
+                     │ Prometheus │
+                     └─────┬──────┘
+                           │
+                           ▼
+                     ┌────────────┐
+                     │  Grafana   │
+                     └────────────┘
+
+    Kubernetes Logs
+           │
+           ▼
+    ┌─────────────┐
+    │    Alloy    │
+    │  DaemonSet  │
+    └──────┬──────┘
+           │
+           ▼
+      ┌─────────┐
+      │  Loki   │
+      └────┬────┘
+           │
+           ▼
+       Grafana
+       Explore
+
+## 1. Cluster Monitoring
+
+Kubernetes Metrics Server provides resource metrics for nodes and pods.
+
+Example:
+
+```bash
+kubectl top nodes
+kubectl top pods -A
